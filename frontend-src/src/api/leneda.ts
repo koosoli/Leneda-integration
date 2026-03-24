@@ -186,11 +186,11 @@ export interface Credentials {
 
 function normalizeCredentials(creds: Credentials): Credentials {
   return {
-    api_key: creds.api_key.trim(),
-    energy_id: creds.energy_id.trim(),
+    api_key: (creds.api_key ?? "").trim(),
+    energy_id: (creds.energy_id ?? "").trim(),
     meters: (creds.meters ?? []).map((meter) => ({
       ...meter,
-      id: meter.id.trim(),
+      id: (meter.id ?? "").trim(),
     })),
   };
 }

@@ -133,6 +133,7 @@ export class LenedaApp {
         // Not configured — send user to Settings to enter credentials
         this.state.tab = "settings";
         this.state.loading = false;
+        // Clear the global error so the settings form stays visible for first-time setup.
         this.state.error = null;
         this.render();
         return;
