@@ -23,23 +23,36 @@ const RANGES: { id: string; label: string }[] = [
 
 export function renderDashboard(state: AppState): string {
   const d = state.rangeData;
+  const toDateInputValue = (value?: string): string => {
+    if (!value) return "";
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : "";
+  };
 
   const consumption = d?.consumption ?? 0;
   const production = d?.production ?? 0;
   const exported = d?.exported ?? 0;
-  const selfConsumed = d?.self_consumed ?? 0;
+  const reportedSelfConsumed = d?.self_consumed ?? 0;
   const gasEnergy = d?.gas_energy ?? 0;
   const gasVolume = d?.gas_volume ?? 0;
   const peakPower = d?.peak_power_kw ?? 0;
+  const periodStartValue = toDateInputValue(d?.start);
+  const periodEndValue = toDateInputValue(d?.end);
 
-  // Luxembourg energy flow model (aligned with invoice/billing data)
+  // Keep preset-range flow math aligned with the older dashboard behavior the user expects.
   const sharedWithMe = d?.shared_with_me ?? 0;
-  const directSolarToHome = Math.min(production, selfConsumed);
-  const solarToHome = directSolarToHome + sharedWithMe;
-  const boughtFromGrid = consumption;
-  const soldToMarket = Math.max(0, exported - (d?.shared ?? 0));
   const shared = d?.shared ?? 0;
-  const totalHomeEnergy = boughtFromGrid + solarToHome;
+  const soldToMarket = Math.max(0, exported);
+  const solarToHome = Math.max(
+    0,
+    d?.solar_to_home ??
+      d?.direct_solar_to_home ??
+      (reportedSelfConsumed > 0 ? reportedSelfConsumed : production - soldToMarket),
+  );
+  const directSolarToHome = Math.max(0, d?.direct_solar_to_home ?? solarToHome);
+  const selfConsumed = solarToHome;
+  const boughtFromGrid = Math.max(0, d?.grid_import ?? (consumption - solarToHome));
+  const totalHomeEnergy = consumption > 0 ? consumption : boughtFromGrid + solarToHome;
 
   // Self-sufficiency
   const selfSufficiency =
@@ -71,7 +84,9 @@ export function renderDashboard(state: AppState): string {
 
   // Chart title — dynamic based on selected range
   const rangeLabel =
-    state.range === "custom" && state.customStart && state.customEnd
+    d?.start && d?.end
+      ? `${fmtDate(d.start)} — ${fmtDate(d.end)}`
+      : state.range === "custom" && state.customStart && state.customEnd
       ? `${fmtDate(state.customStart + "T00:00:00")} — ${fmtDate(state.customEnd + "T00:00:00")}`
       : RANGES.find((r) => r.id === state.range)?.label ?? "Yesterday";
 
@@ -120,6 +135,19 @@ export function renderDashboard(state: AppState): string {
           <input type="date" id="custom-end" value="${state.customEnd ?? ""}" />
         </label>
         <button class="btn btn-primary" id="apply-custom-range">Apply</button>
+      </div>
+      ` : (periodStartValue && periodEndValue) ? `
+      <!-- Preset Period Preview -->
+      <div class="custom-range-picker period-preview">
+        <span class="period-preview-label">Viewed period</span>
+        <label>
+          <span>From</span>
+          <input type="date" value="${periodStartValue}" readonly aria-label="Preset period start" />
+        </label>
+        <label>
+          <span>To</span>
+          <input type="date" value="${periodEndValue}" readonly aria-label="Preset period end" />
+        </label>
       </div>
       ` : ""}
 
@@ -364,7 +392,7 @@ export function renderDashboard(state: AppState): string {
                 <span class="flow-legend-dot"></span>
                 <span class="flow-legend-copy">
                   <strong>Solar to home</strong>
-                  <span>${fmtNum(solarToHome)} kWh used in the house${sharedWithMe > 0 ? ` (${fmtNum(directSolarToHome)} direct + ${fmtNum(sharedWithMe)} via community)` : ""}</span>
+                  <span>${fmtNum(solarToHome)} kWh used in the house</span>
                 </span>
               </div>
               <div class="flow-legend-item import">

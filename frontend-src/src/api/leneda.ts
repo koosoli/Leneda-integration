@@ -30,6 +30,9 @@ export interface RangeData {
   production: number;
   exported: number;
   self_consumed: number;
+  grid_import?: number;
+  solar_to_home?: number;
+  direct_solar_to_home?: number;
   gas_energy: number;
   gas_volume: number;
   peak_power_kw: number;
@@ -49,6 +52,11 @@ export interface CustomRangeData {
   production: number;
   exported?: number;
   self_consumed?: number;
+  grid_import?: number;
+  solar_to_home?: number;
+  direct_solar_to_home?: number;
+  shared?: number;
+  shared_with_me?: number;
   gas_energy?: number;
   gas_volume?: number;
   peak_power_kw?: number;
@@ -226,7 +234,23 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   };
   const resp = await fetch(url, options);
   if (!resp.ok) {
-    throw new Error(`API ${resp.status}: ${resp.statusText}`);
+    const contentType = resp.headers.get("content-type") ?? "";
+    let errorCode = "";
+    let detail = "";
+
+    if (contentType.includes("application/json")) {
+      const body = await resp.json().catch(() => null) as { error?: string; message?: string } | null;
+      errorCode = String(body?.error ?? "").trim();
+      detail = String(body?.message ?? body?.error ?? "").trim();
+    } else {
+      detail = (await resp.text().catch(() => "")).trim();
+    }
+
+    if (errorCode === "missing_data" || errorCode === "no_data" || resp.status === 503) {
+      throw new Error("Missing data");
+    }
+
+    throw new Error(detail ? `API ${resp.status}: ${detail}` : `API ${resp.status}: ${resp.statusText}`);
   }
   return resp.json() as Promise<T>;
 }

@@ -174,7 +174,7 @@ export function renderEnergyChart(
   canvas: HTMLCanvasElement,
   consumption: TimeseriesResponse,
   production: TimeseriesResponse,
-  options: ChartOptions = { unit: "kw", referencePowerKw: 0 },
+  options: ChartOptions = { unit: "kwh", referencePowerKw: 0 },
 ): void {
   // Destroy previous chart if it exists
   if (chartInstance) {

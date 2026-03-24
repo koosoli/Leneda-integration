@@ -18,17 +18,71 @@ import { resolve } from "path";
 
 const DEV_CONFIG_FILE = resolve(__dirname, "dev-config.json");
 
+const NUMERIC_BILLING_KEYS: Array<keyof BillingConfig> = [
+  "energy_fixed_fee",
+  "energy_variable_rate",
+  "network_metering_rate",
+  "network_power_ref_rate",
+  "network_variable_rate",
+  "reference_power_kw",
+  "exceedance_rate",
+  "feed_in_tariff",
+  "gas_fixed_fee",
+  "gas_variable_rate",
+  "gas_network_fee",
+  "gas_network_variable_rate",
+  "gas_tax_rate",
+  "gas_vat_rate",
+  "compensation_fund_rate",
+  "electricity_tax_rate",
+  "connect_discount",
+  "vat_rate",
+];
+
+function normalizeBillingConfig(raw: BillingConfig): BillingConfig {
+  const normalized = { ...DEFAULT_BILLING, ...raw } as BillingConfig;
+
+  for (const key of NUMERIC_BILLING_KEYS) {
+    const rawValue = raw[key];
+    const isBlankString = typeof rawValue === "string" && rawValue.trim() === "";
+    const numericValue = isBlankString ? Number.NaN : (typeof rawValue === "number" ? rawValue : Number(rawValue));
+    normalized[key] = Number.isFinite(numericValue)
+      ? numericValue as BillingConfig[typeof key]
+      : DEFAULT_BILLING[key];
+  }
+
+  normalized.currency =
+    typeof raw.currency === "string" && raw.currency.trim()
+      ? raw.currency.trim()
+      : DEFAULT_BILLING.currency;
+  normalized.feed_in_rates = Array.isArray(raw.feed_in_rates) ? raw.feed_in_rates : DEFAULT_BILLING.feed_in_rates ?? [];
+  normalized.meter_monthly_fees = Array.isArray(raw.meter_monthly_fees) ? raw.meter_monthly_fees : DEFAULT_BILLING.meter_monthly_fees ?? [];
+  normalized.consumption_rate_windows = Array.isArray(raw.consumption_rate_windows) ? raw.consumption_rate_windows : [];
+  normalized.reference_power_windows = Array.isArray(raw.reference_power_windows) ? raw.reference_power_windows : [];
+  normalized.meters = Array.isArray(raw.meters) && raw.meters.length > 0 ? raw.meters : DEFAULT_BILLING.meters ?? [];
+  normalized.meter_has_gas = Boolean(raw.meter_has_gas ?? DEFAULT_BILLING.meter_has_gas);
+
+  return normalized;
+}
+
 function loadDevConfig(): { credentials: typeof DEFAULT_CREDENTIALS; billing: BillingConfig } {
   try {
     if (existsSync(DEV_CONFIG_FILE)) {
-      return JSON.parse(readFileSync(DEV_CONFIG_FILE, "utf8"));
+      const loaded = JSON.parse(readFileSync(DEV_CONFIG_FILE, "utf8"));
+      return {
+        credentials: loaded.credentials ?? { ...DEFAULT_CREDENTIALS },
+        billing: normalizeBillingConfig(loaded.billing ?? { ...DEFAULT_BILLING } as BillingConfig),
+      };
     }
   } catch { /* ignore */ }
-  return { credentials: { ...DEFAULT_CREDENTIALS }, billing: { ...DEFAULT_BILLING } };
+  return { credentials: { ...DEFAULT_CREDENTIALS }, billing: normalizeBillingConfig({ ...DEFAULT_BILLING } as BillingConfig) };
 }
 
 function saveDevConfig(cfg: { credentials: typeof DEFAULT_CREDENTIALS; billing: BillingConfig }): void {
-  writeFileSync(DEV_CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
+  writeFileSync(DEV_CONFIG_FILE, JSON.stringify({
+    credentials: cfg.credentials,
+    billing: normalizeBillingConfig(cfg.billing),
+  }, null, 2), "utf8");
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -45,6 +99,59 @@ function yesterday(): { start: Date; end: Date } {
   const end = new Date(start);
   end.setHours(23, 59, 59, 999);
   return { start, end };
+}
+
+function rangeBounds(range: string): { start: string; end: string } {
+  const now = new Date();
+  const fmt = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  switch (range) {
+    case "yesterday": {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 1);
+      return { start: fmt(d), end: fmt(d) };
+    }
+    case "this_week": {
+      const d = new Date(now);
+      const day = d.getDay() || 7;
+      d.setDate(d.getDate() - day + 1);
+      return { start: fmt(d), end: fmt(now) };
+    }
+    case "last_week": {
+      const d = new Date(now);
+      const day = d.getDay() || 7;
+      const endLW = new Date(d);
+      endLW.setDate(d.getDate() - day);
+      const startLW = new Date(endLW);
+      startLW.setDate(endLW.getDate() - 6);
+      return { start: fmt(startLW), end: fmt(endLW) };
+    }
+    case "this_month": {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start: fmt(start), end: fmt(now) };
+    }
+    case "last_month": {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { start: fmt(start), end: fmt(end) };
+    }
+    case "this_year": {
+      const start = new Date(now.getFullYear(), 0, 1);
+      return { start: fmt(start), end: fmt(now) };
+    }
+    case "last_year": {
+      const start = new Date(now.getFullYear() - 1, 0, 1);
+      const end = new Date(now.getFullYear() - 1, 11, 31);
+      return { start: fmt(start), end: fmt(end) };
+    }
+    default:
+      return rangeBounds("yesterday");
+  }
 }
 
 // ── Range data per period ───────────────────────────────────────
@@ -270,7 +377,9 @@ export const mockHandlers = {
     return { success: true, message: "Connection successful! (mock mode)" };
   },
   getRangeData(range: string): RangeData {
-    return RANGE_DATA[range] ?? RANGE_DATA.yesterday;
+    const base = RANGE_DATA[range] ?? RANGE_DATA.yesterday;
+    const { start, end } = rangeBounds(base.range);
+    return { ...base, start, end };
   },
 
   getTimeseries(obis: string, start?: string, end?: string): TimeseriesResponse {

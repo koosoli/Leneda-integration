@@ -110,7 +110,7 @@ const FIELD_GROUPS: FieldGroup[] = [
     title: "Discounts",
     icon: "💸",
     fields: [
-      { key: "connect_discount", label: "Connect Discount", step: "0.01", unit: "EUR/mo", type: "number" },
+      { key: "connect_discount", label: "Monthly Discount", step: "0.01", unit: "EUR/mo", type: "number" },
     ],
   },
   {

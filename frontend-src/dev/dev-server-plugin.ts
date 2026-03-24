@@ -228,11 +228,123 @@ function meterForObis(obis: string): string {
   return consumption?.id ?? meters[0]?.id ?? "";
 }
 
+function primaryConsumptionMeter(): string {
+  const meters = activeCreds?.meters ?? [];
+  return meters.find((m) => m.types.includes("consumption"))?.id ?? meterForObis("1-1:1.29.0");
+}
+
 /** Return ALL meter IDs tagged as production (for multi-solar summing). */
 function allProductionMeters(): string[] {
   const meters = activeCreds?.meters ?? [];
   const ids = meters.filter((m) => m.types.includes("production")).map((m) => m.id);
   return ids.length ? ids : [meterForObis("1-1:2.29.0")];
+}
+
+function sumAggregatedSeries(data: any): number {
+  return (data?.aggregatedTimeSeries ?? []).reduce(
+    (total: number, item: { value?: number | null }) => total + (item?.value ?? 0),
+    0,
+  );
+}
+
+async function fetchAggregatedValue(
+  meterId: string,
+  obis: string,
+  start: string,
+  end: string,
+  headers: { api_key: string; energy_id: string },
+  required = false,
+): Promise<number> {
+  if (!meterId) return 0;
+  try {
+    const data = await lenedaFetch(
+      `/api/metering-points/${meterId}/time-series/aggregated?obisCode=${encodeURIComponent(obis)}&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`,
+      headers,
+    );
+    return sumAggregatedSeries(data);
+  } catch (error) {
+    if (required) throw error;
+    return 0;
+  }
+}
+
+async function fetchAggregatedSum(
+  meterIds: string[],
+  obis: string,
+  start: string,
+  end: string,
+  headers: { api_key: string; energy_id: string },
+  required = false,
+): Promise<number> {
+  if (!meterIds.length) return 0;
+  const results = await Promise.allSettled(
+    meterIds.map((meterId) => fetchAggregatedValue(meterId, obis, start, end, headers, required)),
+  );
+  if (required) {
+    const rejected = results.find((result) => result.status === "rejected");
+    if (rejected?.status === "rejected") throw rejected.reason;
+  }
+  return results.reduce((sum, result) => (
+    result.status === "fulfilled" ? sum + result.value : sum
+  ), 0);
+}
+
+async function fetchLiveRangeBreakdown(
+  start: string,
+  end: string,
+  headers: { api_key: string; energy_id: string },
+): Promise<{
+  consumption: number;
+  production: number;
+  exported: number;
+  self_consumed: number;
+  grid_import: number;
+  solar_to_home: number;
+  direct_solar_to_home: number;
+  shared: number;
+  shared_with_me: number;
+  gas_energy: number;
+  gas_volume: number;
+  metering_point: string;
+}> {
+  const cMeterId = primaryConsumptionMeter();
+  const prodMeters = allProductionMeters();
+  const gasMeter = activeCreds?.meters.find((m) => m.types.includes("gas"));
+  const sharingLayers = ["1", "2", "3", "4"];
+
+  const [consumption, production, remainingConsumption, gasEnergy, ...coverageParts] = await Promise.all([
+    fetchAggregatedValue(cMeterId, "1-1:1.29.0", start, end, headers, true),
+    fetchAggregatedSum(prodMeters, "1-1:2.29.0", start, end, headers, true),
+    fetchAggregatedValue(cMeterId, "1-65:1.29.9", start, end, headers, true),
+    gasMeter ? fetchAggregatedValue(gasMeter.id, "7-1:3.1.0", start, end, headers) : Promise.resolve(0),
+    ...sharingLayers.map((layer) =>
+      fetchAggregatedValue(cMeterId, `1-65:1.29.${layer}`, start, end, headers, true),
+    ),
+  ]);
+
+  // The dashboard semantics the user expects are:
+  // - solar_to_home = house consumption covered by production (1-65:1.29.x)
+  // - bought_from_grid = remaining consumption (1-65:1.29.9)
+  // - sold_to_market = total production not used in the house
+  const sharedWithMe = coverageParts.reduce((sum, value) => sum + value, 0);
+  const solarToHome = Math.max(0, sharedWithMe);
+  const gridImport = remainingConsumption > 0 ? remainingConsumption : Math.max(0, consumption - solarToHome);
+  const soldToMarket = Math.max(0, production - solarToHome);
+
+  return {
+    consumption,
+    production,
+    exported: soldToMarket,
+    self_consumed: solarToHome,
+    grid_import: gridImport,
+    solar_to_home: solarToHome,
+    direct_solar_to_home: solarToHome,
+    shared: 0,
+    shared_with_me: sharedWithMe,
+    gas_energy: gasEnergy,
+    gas_volume: 0,
+    metering_point: cMeterId,
+  };
 }
 
 async function handleLiveData(path: string, parsed: URL, _req: any, res: any): Promise<void> {
@@ -243,63 +355,26 @@ async function handleLiveData(path: string, parsed: URL, _req: any, res: any): P
   if (path === "/leneda_api/data") {
     const range = parsed.searchParams.get("range") ?? "yesterday";
     const { start, end } = dateRangeFor(range);
-    const cMeterId = meterForObis("1-1:1.29.0");
-    const prodMeters = allProductionMeters();
-    const gasMeter = creds.meters.find((m) => m.types.includes("gas"));
-
-    // Fetch consumption (single meter)
-    const fetches: Promise<any>[] = [
-      lenedaFetch(`/api/metering-points/${cMeterId}/time-series/aggregated?obisCode=1-1:1.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers),
-    ];
-    // Fetch production + export for EACH production meter
-    for (const pm of prodMeters) {
-      fetches.push(
-        lenedaFetch(`/api/metering-points/${pm}/time-series/aggregated?obisCode=1-1:2.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers)
-          .catch(() => null)
-      );
-      fetches.push(
-        lenedaFetch(`/api/metering-points/${pm}/time-series/aggregated?obisCode=1-65:2.29.9&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers)
-          .catch(() => null)
-      );
+    const cMeterId = primaryConsumptionMeter();
+    let rangeData;
+    try {
+      rangeData = await fetchLiveRangeBreakdown(start, end, headers);
+    } catch (error) {
+      console.warn("[leneda-dev-api] Missing range data", error);
+      res.statusCode = 503;
+      return json(res, { error: "missing_data" });
     }
-    // Gas (if meter configured)
-    if (gasMeter) {
-      fetches.push(
-        lenedaFetch(`/api/metering-points/${gasMeter.id}/time-series/aggregated?obisCode=7-1:3.1.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers)
-          .catch(() => null)
-      );
-    }
-
-    const results = await Promise.all(fetches);
-    const consumption = results[0]?.aggregatedTimeSeries?.[0]?.value ?? 0;
-
-    // Sum production + export across all production meters
-    let production = 0;
-    let exported = 0;
-    for (let i = 0; i < prodMeters.length; i++) {
-      production += results[1 + i * 2]?.aggregatedTimeSeries?.[0]?.value ?? 0;
-      exported += results[2 + i * 2]?.aggregatedTimeSeries?.[0]?.value ?? 0;
-    }
-    const selfConsumed = Math.max(0, production - exported);
-    const gasIdx = 1 + prodMeters.length * 2;
-    const gasEnergy = gasMeter ? (results[gasIdx]?.aggregatedTimeSeries?.[0]?.value ?? 0) : 0;
 
     // Compute peak power & exceedance from 15-min consumption timeseries
     const { peak_power_kw, exceedance_kwh } = await fetchPeakExceedance(cMeterId, start, end, headers);
 
     return json(res, {
       range,
-      consumption,
-      production,
-      exported,
-      self_consumed: selfConsumed,
-      shared: 0,
-      shared_with_me: 0,
-      gas_energy: gasEnergy,
-      gas_volume: 0,
+      ...rangeData,
       peak_power_kw,
       exceedance_kwh,
-      metering_point: cMeterId,
+      start,
+      end,
     });
   }
 
@@ -309,31 +384,21 @@ async function handleLiveData(path: string, parsed: URL, _req: any, res: any): P
     const end = parsed.searchParams.get("end") ?? "";
     if (!start || !end) { res.statusCode = 400; return json(res, { error: "start and end required" }); }
 
-    const cMeterId = meterForObis("1-1:1.29.0");
-    const prodMeters = allProductionMeters();
-
-    // Consumption (single meter) + production for each production meter
-    const fetches: Promise<any>[] = [
-      lenedaFetch(`/api/metering-points/${cMeterId}/time-series/aggregated?obisCode=1-1:1.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers),
-    ];
-    for (const pm of prodMeters) {
-      fetches.push(
-        lenedaFetch(`/api/metering-points/${pm}/time-series/aggregated?obisCode=1-1:2.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers)
-          .catch(() => null)
-      );
-    }
-    const results = await Promise.all(fetches);
-    let production = 0;
-    for (let i = 0; i < prodMeters.length; i++) {
-      production += results[1 + i]?.aggregatedTimeSeries?.[0]?.value ?? 0;
+    const cMeterId = primaryConsumptionMeter();
+    let rangeData;
+    try {
+      rangeData = await fetchLiveRangeBreakdown(start, end, headers);
+    } catch (error) {
+      console.warn("[leneda-dev-api] Missing custom range data", error);
+      res.statusCode = 503;
+      return json(res, { error: "missing_data" });
     }
 
     // Compute peak power & exceedance from 15-min consumption timeseries
     const { peak_power_kw, exceedance_kwh } = await fetchPeakExceedance(cMeterId, start, end, headers);
 
     return json(res, {
-      consumption: results[0]?.aggregatedTimeSeries?.[0]?.value ?? 0,
-      production,
+      ...rangeData,
       peak_power_kw,
       exceedance_kwh,
       start, end,
@@ -491,14 +556,17 @@ async function handleMockData(path: string, parsed: URL, req: any, res: any): Pr
 function computePeakAndExceedance(
   items: Array<{ value: number }>,
   refPowerKw: number,
+  productionByTs: Map<string, number> = new Map(),
 ): { peak_power_kw: number; exceedance_kwh: number } {
   let peak = 0;
   let exceedance = 0;
-  for (const item of items) {
+  for (const item of items as Array<{ value: number; startedAt?: string }>) {
     const kw = item.value ?? 0;
-    if (kw > peak) peak = kw;
-    if (kw > refPowerKw) {
-      exceedance += (kw - refPowerKw) * 0.25; // 15-min interval → 0.25 h
+    const solarKw = productionByTs.get(item.startedAt ?? "") ?? 0;
+    const netKw = Math.max(0, kw - solarKw);
+    if (netKw > peak) peak = netKw;
+    if (netKw > refPowerKw) {
+      exceedance += (netKw - refPowerKw) * 0.25; // 15-min interval → 0.25 h
     }
   }
   return { peak_power_kw: Math.round(peak * 100) / 100, exceedance_kwh: Math.round(exceedance * 10000) / 10000 };
@@ -515,17 +583,34 @@ async function fetchPeakExceedance(
     const { mockHandlers } = await import("./mock-data");
     const cfg = mockHandlers.getConfig();
     const refPower: number = (cfg as any).reference_power_kw ?? 5;
+    const productionByTs = new Map<string, number>();
 
     // Convert YYYY-MM-DD to ISO for timeseries endpoint
     const startDt = new Date(startDate + "T00:00:00.000Z").toISOString();
     const endDt = new Date(endDate + "T23:59:59.999Z").toISOString();
 
-    const data = await lenedaFetch(
+    const [data, ...productionSeries] = await Promise.all([
+      lenedaFetch(
       `/api/metering-points/${meterId}/time-series?obisCode=1-1:1.29.0&startDateTime=${encodeURIComponent(startDt)}&endDateTime=${encodeURIComponent(endDt)}`,
       headers,
-    );
-    const items: Array<{ value: number }> = data?.items ?? [];
-    return computePeakAndExceedance(items, refPower);
+      ),
+      ...allProductionMeters().map((productionMeterId) =>
+        lenedaFetch(
+          `/api/metering-points/${productionMeterId}/time-series?obisCode=1-1:2.29.0&startDateTime=${encodeURIComponent(startDt)}&endDateTime=${encodeURIComponent(endDt)}`,
+          headers,
+        ).catch(() => null),
+      ),
+    ]);
+
+    for (const series of productionSeries) {
+      for (const item of series?.items ?? []) {
+        const ts = item.startedAt ?? "";
+        productionByTs.set(ts, (productionByTs.get(ts) ?? 0) + (item.value ?? 0));
+      }
+    }
+
+    const items: Array<{ value: number; startedAt?: string }> = data?.items ?? [];
+    return computePeakAndExceedance(items, refPower, productionByTs);
   } catch {
     return { peak_power_kw: 0, exceedance_kwh: 0 };
   }
@@ -554,8 +639,12 @@ function readBody(req: any): Promise<Record<string, unknown>> {
 
 function dateRangeFor(range: string): { start: string; end: string } {
   const now = new Date();
-  const fmt = (d: Date) =>
-    d.toISOString().slice(0, 10); // YYYY-MM-DD
+  const fmt = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   switch (range) {
     case "yesterday": {

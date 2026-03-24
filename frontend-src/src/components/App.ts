@@ -71,6 +71,7 @@ export interface AppState {
   chartUnit: "kw" | "kwh";
   rangeData: RangeData | null;
   consumptionTimeseries: TimeseriesResponse | null;
+  productionTimeseries: TimeseriesResponse | null;
   sensors: SensorsResponse | null;
   config: BillingConfig | null;
   loading: boolean;
@@ -88,9 +89,10 @@ export class LenedaApp {
     range: "yesterday",
     customStart: "",
     customEnd: "",
-    chartUnit: "kw",
+    chartUnit: "kwh",
     rangeData: null,
     consumptionTimeseries: null,
+    productionTimeseries: null,
     sensors: null,
     config: null,
     loading: true,
@@ -158,9 +160,30 @@ export class LenedaApp {
     await this.loadData();
   }
 
+  private toDisplayError(error: unknown, fallback = "Failed to load data"): string {
+    const message = error instanceof Error ? error.message : String(error ?? "").trim();
+    const normalized = message.toLowerCase();
+    if (
+      normalized.includes("missing data") ||
+      normalized.includes("no_data") ||
+      normalized.includes("no data")
+    ) {
+      return "Missing data";
+    }
+    return message || fallback;
+  }
+
+  private clearRangeStateWithError(error: unknown, fallback = "Failed to load data"): void {
+    this.state.rangeData = null;
+    this.state.consumptionTimeseries = null;
+    this.state.productionTimeseries = null;
+    this.state.error = this.toDisplayError(error, fallback);
+  }
+
   private async loadData(): Promise<void> {
     this.state.loading = true;
     this.state.error = null;
+    this.state.rangeData = null; // Clear stale data before fetching
     this.render();
 
     try {
@@ -170,14 +193,17 @@ export class LenedaApp {
         fetchConfig(),
       ]);
       const { start, end } = this.getDateRangeISO();
-      const consumptionTimeseries = await fetchTimeseries("1-1:1.29.0", start, end);
+      const [consumptionTimeseries, productionTimeseries] = await Promise.all([
+        fetchTimeseries("1-1:1.29.0", start, end),
+        fetchTimeseries("1-1:2.29.0", start, end),
+      ]);
       this.state.rangeData = rangeData;
       this.state.consumptionTimeseries = consumptionTimeseries;
+      this.state.productionTimeseries = productionTimeseries;
       this.state.sensors = sensors;
       this.state.config = config;
     } catch (e) {
-      this.state.error =
-        e instanceof Error ? e.message : "Failed to load data";
+      this.clearRangeStateWithError(e, "Failed to load data");
     } finally {
       this.state.loading = false;
       this.render();
@@ -203,19 +229,21 @@ export class LenedaApp {
       return;
     }
 
+    this.state.error = null;
     this.state.loading = true;
     this.render();
     try {
       const { start, end } = this.getDateRangeISO();
-      const [rangeData, consumptionTimeseries] = await Promise.all([
+      const [rangeData, consumptionTimeseries, productionTimeseries] = await Promise.all([
         fetchRangeData(range),
         fetchTimeseries("1-1:1.29.0", start, end),
+        fetchTimeseries("1-1:2.29.0", start, end),
       ]);
       this.state.rangeData = rangeData;
       this.state.consumptionTimeseries = consumptionTimeseries;
+      this.state.productionTimeseries = productionTimeseries;
     } catch (e) {
-      this.state.error =
-        e instanceof Error ? e.message : "Failed to load data";
+      this.clearRangeStateWithError(e, "Missing data");
     } finally {
       this.state.loading = false;
       this.render();
@@ -227,15 +255,21 @@ export class LenedaApp {
     const { customStart, customEnd } = this.state;
     if (!customStart || !customEnd) return;
 
+    this.state.error = null;
     this.state.loading = true;
     this.render();
 
     try {
       const { fetchCustomData } = await import("../api/leneda");
-      const [data, consumptionTimeseries] = await Promise.all([
+      const [data, consumptionTimeseries, productionTimeseries] = await Promise.all([
         fetchCustomData(customStart, customEnd),
         fetchTimeseries(
           "1-1:1.29.0",
+          new Date(customStart + "T00:00:00").toISOString(),
+          new Date(customEnd + "T23:59:59.999").toISOString(),
+        ),
+        fetchTimeseries(
+          "1-1:2.29.0",
           new Date(customStart + "T00:00:00").toISOString(),
           new Date(customEnd + "T23:59:59.999").toISOString(),
         ),
@@ -246,16 +280,23 @@ export class LenedaApp {
         production: data.production,
         exported: data.exported ?? 0,
         self_consumed: data.self_consumed ?? 0,
+        grid_import: data.grid_import,
+        solar_to_home: data.solar_to_home,
+        direct_solar_to_home: data.direct_solar_to_home,
+        shared: data.shared,
+        shared_with_me: data.shared_with_me,
         gas_energy: data.gas_energy ?? 0,
         gas_volume: data.gas_volume ?? 0,
         peak_power_kw: data.peak_power_kw ?? 0,
         exceedance_kwh: data.exceedance_kwh ?? 0,
         metering_point: data.metering_point ?? "",
+        start: data.start,
+        end: data.end,
       };
       this.state.consumptionTimeseries = consumptionTimeseries;
+      this.state.productionTimeseries = productionTimeseries;
     } catch (e) {
-      this.state.error =
-        e instanceof Error ? e.message : "Failed to load custom data";
+      this.clearRangeStateWithError(e, "Missing data");
     } finally {
       this.state.loading = false;
       this.render();
@@ -267,6 +308,9 @@ export class LenedaApp {
     this.render();
 
     // Lazy-load data for specific tabs
+    if (tab === "dashboard" && !this.state.rangeData && !this.state.loading) {
+      this.loadData();
+    }
     if (tab === "sensors" && !this.state.sensors) {
       fetchSensors().then((s) => {
         this.state.sensors = s;
@@ -350,13 +394,14 @@ export class LenedaApp {
 
     // ── Error state ──
     if (error && !this.state.rangeData) {
+      const missingData = error.toLowerCase().includes("missing data");
       this.root.innerHTML = `
         <div class="app-shell">
           ${renderNavBar(tab, (_t) => { }, false, theme)}
           <main class="main-content">
             <div class="error-state">
-              <h2>Connection Error</h2>
-              <p>${error}</p>
+              <h2>${missingData ? "Missing Data" : "Connection Error"}</h2>
+              <p>${missingData ? "The selected period could not be loaded because data is missing." : error}</p>
               <button class="btn btn-primary" id="retry-btn">Retry</button>
             </div>
           </main>
@@ -672,8 +717,17 @@ export class LenedaApp {
           continue;
         }
         if (data[key] !== undefined && typeof data[key] === "boolean") continue;
-        const num = parseFloat(val as string);
-        data[key] = isNaN(num) ? (val as string) : num;
+        const rawValue = val as string;
+        const fieldEl = form.elements.namedItem(key);
+        if (rawValue === "" && fieldEl instanceof HTMLInputElement && fieldEl.type === "number") {
+          const currentValue = this.state.config?.[key as keyof BillingConfig];
+          if (typeof currentValue === "number" && isFinite(currentValue)) {
+            data[key] = currentValue;
+          }
+          continue;
+        }
+        const num = parseFloat(rawValue);
+        data[key] = isNaN(num) ? rawValue : num;
       }
 
       for (const idx of Object.keys(rateMap).sort()) {
@@ -723,7 +777,7 @@ export class LenedaApp {
           day_group: "weekdays",
           start_time: "17:00",
           end_time: "00:00",
-          rate: this.state.config?.energy_variable_rate ?? 0.15,
+          rate: this.state.config?.energy_variable_rate ?? 0.1125,
         });
         draft.consumption_rate_windows = windows;
       });
@@ -891,11 +945,18 @@ export class LenedaApp {
       const startDate = start.slice(0, 10);
       const endDate = end.slice(0, 10);
       const data = await fetchCustomData(startDate, endDate);
-      const consumptionTimeseries = await fetchTimeseries(
-        "1-1:1.29.0",
-        new Date(startDate + "T00:00:00").toISOString(),
-        new Date(endDate + "T23:59:59.999").toISOString(),
-      );
+      const [consumptionTimeseries, productionTimeseries] = await Promise.all([
+        fetchTimeseries(
+          "1-1:1.29.0",
+          new Date(startDate + "T00:00:00").toISOString(),
+          new Date(endDate + "T23:59:59.999").toISOString(),
+        ),
+        fetchTimeseries(
+          "1-1:2.29.0",
+          new Date(startDate + "T00:00:00").toISOString(),
+          new Date(endDate + "T23:59:59.999").toISOString(),
+        ),
+      ]);
 
       // Switch to custom range with the zoomed period
       this.state.range = "custom";
@@ -909,16 +970,26 @@ export class LenedaApp {
         self_consumed: data.self_consumed ?? 0,
         gas_energy: data.gas_energy ?? 0,
         gas_volume: data.gas_volume ?? 0,
+        grid_import: data.grid_import,
+        solar_to_home: data.solar_to_home,
+        direct_solar_to_home: data.direct_solar_to_home,
+        shared: data.shared,
+        shared_with_me: data.shared_with_me,
         peak_power_kw: data.peak_power_kw ?? 0,
         exceedance_kwh: data.exceedance_kwh ?? 0,
         metering_point: data.metering_point ?? "",
+        start: data.start,
+        end: data.end,
       };
       this.state.consumptionTimeseries = consumptionTimeseries;
+      this.state.productionTimeseries = productionTimeseries;
 
       // Partial DOM update — everything except the chart canvas
       this.renderDashboardPartial();
     } catch (e) {
       console.error("Zoom data fetch failed:", e);
+      this.clearRangeStateWithError(e, "Missing data");
+      this.render();
     }
   }
 
@@ -943,23 +1014,35 @@ export class LenedaApp {
     const newRange = src.querySelector(".range-selector");
     if (oldRange && newRange) oldRange.replaceWith(newRange);
 
-    // 2. Custom date picker — show the zoomed dates
+    // 2. Range info bar and custom date picker
+    const oldRangeInfo = dashboard.querySelector(".range-info-bar");
+    const newRangeInfo = src.querySelector(".range-info-bar");
+    if (oldRangeInfo && newRangeInfo) {
+      oldRangeInfo.replaceWith(newRangeInfo);
+    } else if (!oldRangeInfo && newRangeInfo) {
+      dashboard.querySelector(".range-selector")?.insertAdjacentElement("afterend", newRangeInfo);
+    } else if (oldRangeInfo && !newRangeInfo) {
+      oldRangeInfo.remove();
+    }
+
+    // 3. Custom date picker — show the zoomed dates
     const oldPicker = dashboard.querySelector(".custom-range-picker");
     const newPicker = src.querySelector(".custom-range-picker");
     if (oldPicker && newPicker) {
       oldPicker.replaceWith(newPicker);
     } else if (!oldPicker && newPicker) {
-      dashboard.querySelector(".range-selector")?.insertAdjacentElement("afterend", newPicker);
+      const anchor = dashboard.querySelector(".range-info-bar") ?? dashboard.querySelector(".range-selector");
+      anchor?.insertAdjacentElement("afterend", newPicker);
     } else if (oldPicker && !newPicker) {
       oldPicker.remove();
     }
 
-    // 3. Stat cards
+    // 4. Stat cards
     const oldStats = dashboard.querySelector(".stats-grid");
     const newStats = src.querySelector(".stats-grid");
     if (oldStats && newStats) oldStats.replaceWith(newStats);
 
-    // 4. Flow diagram + key metrics
+    // 5. Flow diagram + key metrics
     const oldFlow = dashboard.querySelector(".flow-card");
     const newFlow = src.querySelector(".flow-card");
     if (oldFlow && newFlow) oldFlow.replaceWith(newFlow);
@@ -968,7 +1051,7 @@ export class LenedaApp {
     const newMetrics = src.querySelector(".metrics-card");
     if (oldMetrics && newMetrics) oldMetrics.replaceWith(newMetrics);
 
-    // 5. Chart title (shows the zoomed date range)
+    // 6. Chart title (shows the zoomed date range)
     const oldTitle = dashboard.querySelector(".chart-header .card-title");
     const newTitle = src.querySelector(".chart-header .card-title");
     if (oldTitle && newTitle) oldTitle.replaceWith(newTitle);

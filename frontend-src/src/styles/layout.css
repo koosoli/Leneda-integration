@@ -198,6 +198,28 @@ a:hover {
   box-shadow: 0 0 0 3px var(--clr-primary-muted);
 }
 
+.period-preview {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--clr-surface-alt);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-md);
+}
+
+.period-preview-label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--clr-text-secondary);
+}
+
+.period-preview input[type="date"][readonly] {
+  background: var(--clr-surface);
+  color: var(--clr-text);
+  opacity: 1;
+  cursor: default;
+}
+
 /* ── Chart container ───────────────────────────────────────────── */
 .chart-section {
   margin-top: var(--sp-6);

@@ -29,6 +29,73 @@ from .storage import get_effective_reference_power
 _LOGGER = logging.getLogger(__name__)
 
 
+PRESET_RANGE_MAPPING: dict[str, dict[str, str | None]] = {
+    "yesterday": {
+        "consumption": "c_04_yesterday_consumption",
+        "production": "p_04_yesterday_production",
+        "exported": "p_09_yesterday_exported",
+        "self_consumed": "p_12_yesterday_self_consumed",
+        "shared": "s_sent_yesterday",
+        "shared_with_me": "s_received_yesterday",
+        "gas_energy": "g_01_yesterday_consumption",
+        "gas_volume": "g_10_yesterday_volume",
+        "exceedance": "yesterdays_power_usage_over_reference",
+    },
+    "this_week": {
+        "consumption": "c_05_weekly_consumption",
+        "production": "p_05_weekly_production",
+        "exported": "p_17_weekly_exported",
+        "self_consumed": "p_18_weekly_self_consumed",
+        "shared": "s_sent_weekly",
+        "shared_with_me": "s_received_weekly",
+        "gas_energy": "g_02_weekly_consumption",
+        "gas_volume": "g_11_weekly_volume",
+        "exceedance": None,
+    },
+    "last_week": {
+        "consumption": "c_06_last_week_consumption",
+        "production": "p_06_last_week_production",
+        "exported": "p_10_last_week_exported",
+        "self_consumed": "p_13_last_week_self_consumed",
+        "shared": "s_sent_last_week",
+        "shared_with_me": "s_received_last_week",
+        "gas_energy": "g_03_last_week_consumption",
+        "gas_volume": "g_12_last_week_volume",
+        "exceedance": None,
+    },
+    "this_month": {
+        "consumption": "c_07_monthly_consumption",
+        "production": "p_07_monthly_production",
+        "exported": "p_15_monthly_exported",
+        "self_consumed": "p_16_monthly_self_consumed",
+        "shared": "s_sent_monthly",
+        "shared_with_me": "s_received_monthly",
+        "gas_energy": "g_04_monthly_consumption",
+        "gas_volume": "g_13_monthly_volume",
+        "exceedance": "current_month_power_usage_over_reference",
+    },
+    "last_month": {
+        "consumption": "c_08_previous_month_consumption",
+        "production": "p_08_previous_month_production",
+        "exported": "p_11_last_month_exported",
+        "self_consumed": "p_14_last_month_self_consumed",
+        "shared": "s_sent_last_month",
+        "shared_with_me": "s_received_last_month",
+        "gas_energy": "g_05_last_month_consumption",
+        "gas_volume": "g_14_last_month_volume",
+        "exceedance": "last_month_power_usage_over_reference",
+    },
+}
+
+PRESET_REMAINING_CONSUMPTION_KEYS: dict[str, str | None] = {
+    "yesterday": None,
+    "this_week": None,
+    "last_week": None,
+    "this_month": None,
+    "last_month": "s_c_rem_last_month",
+}
+
+
 class LenedaModeView(HomeAssistantView):
     """Return deployment mode so the frontend knows to hide credential UI."""
 
@@ -187,6 +254,74 @@ def _combine_cached_data(coordinators: list[Any]) -> dict[str, Any]:
     return combined
 
 
+def _nonzero_or_fallback(value: Any, fallback: float) -> float:
+    """Prefer the live value unless it collapsed to zero while cache has data."""
+    try:
+        numeric = float(value or 0)
+    except (TypeError, ValueError):
+        return fallback
+    return numeric if abs(numeric) > 1e-9 or abs(fallback) <= 1e-9 else fallback
+
+
+def _build_cached_preset_data(cd: dict[str, Any], range_type: str) -> dict[str, Any] | None:
+    """Build preset-range data from coordinator cache, including derived flow fields."""
+    keys = PRESET_RANGE_MAPPING.get(range_type)
+    if not keys:
+        return None
+
+    consumption = float(cd.get(keys["consumption"], 0) or 0)
+    production = float(cd.get(keys["production"], 0) or 0)
+    covered_by_production = float(cd.get(keys.get("shared_with_me"), 0) or 0) if keys.get("shared_with_me") else 0.0
+    shared_with_me = covered_by_production
+    solar_to_home = max(0.0, covered_by_production)
+    direct_solar_to_home = solar_to_home
+    remaining_consumption_key = PRESET_REMAINING_CONSUMPTION_KEYS.get(range_type)
+    remaining_consumption = (
+        float(cd.get(remaining_consumption_key, 0) or 0) if remaining_consumption_key else 0.0
+    )
+    grid_import = remaining_consumption if remaining_consumption > 0 else max(0.0, consumption - solar_to_home)
+    market_export = max(0.0, production - solar_to_home)
+    shared = 0.0
+
+    return {
+        "consumption": round(consumption, 4),
+        "production": round(production, 4),
+        "exported": round(market_export, 4),
+        "self_consumed": round(solar_to_home, 4),
+        "grid_import": round(grid_import, 4),
+        "solar_to_home": round(solar_to_home, 4),
+        "direct_solar_to_home": round(direct_solar_to_home, 4),
+        "shared": round(shared, 4),
+        "shared_with_me": round(shared_with_me, 4),
+        "gas_energy": round(float(cd.get(keys["gas_energy"], 0) or 0), 4),
+        "gas_volume": round(float(cd.get(keys["gas_volume"], 0) or 0), 4),
+        "peak_power_kw": float(cd.get("1-1:1.29.0", 0) or 0),
+        "exceedance_kwh": round(float(cd.get(keys["exceedance"], 0) or 0), 4) if keys.get("exceedance") else 0.0,
+    }
+
+
+def _merge_live_with_cached_preset(live_data: dict[str, Any], cached_data: dict[str, Any]) -> dict[str, Any]:
+    """Keep live totals, but fall back to cached preset flow values when live zeros are wrong."""
+    merged = dict(cached_data)
+    for key in (
+        "consumption",
+        "production",
+        "exported",
+        "self_consumed",
+        "grid_import",
+        "solar_to_home",
+        "direct_solar_to_home",
+        "shared",
+        "shared_with_me",
+        "gas_energy",
+        "gas_volume",
+        "peak_power_kw",
+        "exceedance_kwh",
+    ):
+        merged[key] = round(_nonzero_or_fallback(live_data.get(key), float(cached_data.get(key, 0) or 0)), 4)
+    return merged
+
+
 def _time_to_minutes(value: str) -> int:
     """Convert HH:MM to minutes since midnight."""
     try:
@@ -265,17 +400,43 @@ async def _fetch_peak_and_exceedance(coordinator, start_dt: datetime, end_dt: da
             c_meter, "1-1:1.29.0", start_dt, end_dt
         )
         items = ts_data.get("items", []) if isinstance(ts_data, dict) else []
+
+        # Solar acts like power shaving: only net house demand counts toward exceedance.
+        prod_by_ts: dict[str, float] = {}
+        production_routes = _get_meter_routes(coordinator.hass).get("production", [])
+        if production_routes:
+            import asyncio as _aio
+
+            prod_results = await _aio.gather(*[
+                route["api_client"].async_get_metering_data(
+                    route["meter_id"], "1-1:2.29.0", start_dt, end_dt
+                )
+                for route in production_routes
+            ], return_exceptions=True)
+
+            for result in prod_results:
+                if not isinstance(result, dict):
+                    continue
+                for item in result.get("items", []):
+                    try:
+                        ts = item["startedAt"]
+                        prod_by_ts[ts] = prod_by_ts.get(ts, 0.0) + float(item["value"])
+                    except (TypeError, ValueError, KeyError):
+                        continue
+
         for item in items:
             try:
-                kw = float(item["value"])
-                if kw > peak_power_kw:
-                    peak_power_kw = kw
+                consumption_kw = float(item["value"])
+                solar_kw = prod_by_ts.get(item.get("startedAt", ""), 0.0)
+                net_kw = max(0.0, consumption_kw - solar_kw)
+                if net_kw > peak_power_kw:
+                    peak_power_kw = net_kw
 
                 started_at = item.get("startedAt")
                 item_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00")) if started_at else start_dt
                 ref_power = _get_reference_power_for_dt(coordinator.hass, coordinator.entry, item_dt)
-                if ref_power is not None and kw > ref_power:
-                    exceedance_kwh += (kw - ref_power) * 0.25
+                if ref_power is not None and net_kw > ref_power:
+                    exceedance_kwh += (net_kw - ref_power) * 0.25
             except (ValueError, TypeError, KeyError):
                 continue
     except Exception:
@@ -299,73 +460,12 @@ class LenedaDataView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
         range_type = request.query.get("range", "yesterday")
-        coordinator = _get_preferred_coordinator(hass, "consumption")
-        coordinators = _get_coordinators(hass)
+        coordinator = _get_first_coordinator(hass)
 
-        if not coordinator or not coordinators or not any(getattr(c, "data", None) for c in coordinators):
+        if not coordinator or not coordinator.data:
             return self.json({"error": "no_data"}, status_code=503)
 
-        cd = _combine_cached_data(coordinators)
-
-        # Mapping determines which coordinator keys to use for preset ranges.
-        # If a range is not in this mapping (like this_year), we skip coordinator data and fetch live.
-        mapping = {
-            "yesterday": {
-                "consumption": "c_04_yesterday_consumption",
-                "production": "p_04_yesterday_production",
-                "exported": "p_09_yesterday_exported",
-                "self_consumed": "p_12_yesterday_self_consumed",
-                "shared": "s_sent_yesterday",
-                "shared_with_me": "s_received_yesterday",
-                "gas_energy": "g_01_yesterday_consumption",
-                "gas_volume": "g_10_yesterday_volume",
-                "exceedance": "yesterdays_power_usage_over_reference",
-            },
-            "this_week": {
-                "consumption": "c_05_weekly_consumption",
-                "production": "p_05_weekly_production",
-                "exported": "p_17_weekly_exported",
-                "self_consumed": "p_18_weekly_self_consumed",
-                "shared": "s_sent_weekly",
-                "shared_with_me": "s_received_weekly",
-                "gas_energy": "g_02_weekly_consumption",
-                "gas_volume": "g_11_weekly_volume",
-                "exceedance": None,
-            },
-            "last_week": {
-                "consumption": "c_06_last_week_consumption",
-                "production": "p_06_last_week_production",
-                "exported": "p_10_last_week_exported",
-                "self_consumed": "p_13_last_week_self_consumed",
-                "shared": "s_sent_last_week",
-                "shared_with_me": "s_received_last_week",
-                "gas_energy": "g_03_last_week_consumption",
-                "gas_volume": "g_12_last_week_volume",
-                "exceedance": None,
-            },
-            "this_month": {
-                "consumption": "c_07_monthly_consumption",
-                "production": "p_07_monthly_production",
-                "exported": "p_15_monthly_exported",
-                "self_consumed": "p_16_monthly_self_consumed",
-                "shared": "s_sent_monthly",
-                "shared_with_me": "s_received_monthly",
-                "gas_energy": "g_04_monthly_consumption",
-                "gas_volume": "g_13_monthly_volume",
-                "exceedance": "current_month_power_usage_over_reference",
-            },
-            "last_month": {
-                "consumption": "c_08_previous_month_consumption",
-                "production": "p_08_previous_month_production",
-                "exported": "p_11_last_month_exported",
-                "self_consumed": "p_14_last_month_self_consumed",
-                "shared": "s_sent_last_month",
-                "shared_with_me": "s_received_last_month",
-                "gas_energy": "g_05_last_month_consumption",
-                "gas_volume": "g_14_last_month_volume",
-                "exceedance": "last_month_power_usage_over_reference",
-            },
-        }
+        cd = coordinator.data
 
         # Determine bounds using Home Assistant's time utilities
         from homeassistant.util import dt as dt_util
@@ -404,36 +504,22 @@ class LenedaDataView(HomeAssistantView):
         # Initialize response
         response = {
             "range": range_type,
-            "metering_point": coordinator.metering_point_id if len(coordinators) == 1 else "multiple",
+            "metering_point": coordinator.metering_point_id,
             "start": s.isoformat() if s else None,
             "end": e.isoformat() if e else None,
         }
 
-        if range_type in mapping:
-            keys = mapping[range_type]
-            # Peak power: max 15-min consumption reading from the OBIS raw data
-            peak_power = cd.get("1-1:1.29.0", 0) or 0
-            response.update({
-                "consumption": cd.get(keys["consumption"], 0),
-                "production": cd.get(keys["production"], 0),
-                "exported": cd.get(keys["exported"], 0) if keys["exported"] else 0,
-                "self_consumed": cd.get(keys["self_consumed"], 0) if keys["self_consumed"] else 0,
-                "shared": cd.get(keys.get("shared"), 0) if keys.get("shared") else 0,
-                "shared_with_me": cd.get(keys.get("shared_with_me"), 0) if keys.get("shared_with_me") else 0,
-                "gas_energy": cd.get(keys["gas_energy"], 0),
-                "gas_volume": cd.get(keys["gas_volume"], 0),
-                "peak_power_kw": peak_power,
-                "exceedance_kwh": cd.get(keys["exceedance"], 0) if keys.get("exceedance") else 0,
-            })
-            if _has_reference_power_windows(hass) and s and e:
-                response.update(await _fetch_peak_and_exceedance(coordinator, s, e))
+        if range_type in PRESET_RANGE_MAPPING:
+            cached_data = _build_cached_preset_data(cd, range_type)
+            if not cached_data:
+                return self.json({"error": f"Unsupported range: {range_type}"}, status_code=400)
+            response.update(cached_data)
         elif range_type in ("this_year", "last_year"):
-            # Fetch live data for yearly ranges
             try:
                 live_data = await _fetch_live_aggregated_data(hass, s, e)
                 response.update(live_data)
             except Exception as exc:
-                _LOGGER.error("Error fetching live yearly data: %s", exc)
+                _LOGGER.error("Error fetching live aggregated data for %s: %s", range_type, exc)
                 return self.json({"error": str(exc)}, status_code=500)
         else:
             # Fallback for unknown ranges (should not happen with standard UI)
@@ -516,7 +602,7 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
 
     c_val = await _fetch_sum(consumption_routes, "1-1:1.29.0")
     p_val = await _fetch_sum(production_routes, "1-1:2.29.0")
-    e_val = await _fetch_sum(production_routes, "1-65:2.29.9")
+    grid_import_val = await _fetch_sum(consumption_routes, "1-65:1.29.9")
     gas_energy = await _fetch_sum(gas_routes, "7-20:99.33.17")
     gas_volume = await _fetch_sum(gas_routes, "7-1:99.23.15")
 
@@ -524,11 +610,10 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
     for layer in SHARING_LAYERS:
         swm_val += await _fetch_sum(consumption_routes, f"1-65:1.29.{layer}")
 
-    s_val = 0.0
-    for layer in SHARING_LAYERS:
-        s_val += await _fetch_sum(production_routes, f"1-65:2.29.{layer}")
-
-    sc_val = max(0, p_val - e_val)
+    solar_to_home = max(0.0, swm_val)
+    direct_solar_to_home = solar_to_home
+    billed_grid_import = grid_import_val if grid_import_val > 0 else max(0, c_val - solar_to_home)
+    market_export = max(0.0, p_val - solar_to_home)
 
     peak_coordinator = _get_preferred_coordinator(hass, "consumption") or _get_first_coordinator(hass)
     peak_exceedance = await _fetch_peak_and_exceedance(peak_coordinator, start_dt, end_dt) if peak_coordinator else {
@@ -539,9 +624,12 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
     return {
         "consumption": round(c_val, 4),
         "production": round(p_val, 4),
-        "exported": round(e_val, 4),
-        "self_consumed": round(sc_val, 4),
-        "shared": round(s_val, 4),
+        "exported": round(market_export, 4),
+        "self_consumed": round(solar_to_home, 4),
+        "grid_import": round(billed_grid_import, 4),
+        "solar_to_home": round(solar_to_home, 4),
+        "direct_solar_to_home": round(direct_solar_to_home, 4),
+        "shared": 0.0,
         "shared_with_me": round(swm_val, 4),
         "gas_energy": round(gas_energy, 4),
         "gas_volume": round(gas_volume, 4),

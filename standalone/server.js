@@ -46,20 +46,20 @@ const MIME = {
 // ─── Config persistence ─────────────────────────────────────────
 
 const DEFAULT_BILLING = {
-  energy_fixed_fee: 1.5,
-  energy_variable_rate: 0.15,
-  network_metering_rate: 5.9,
-  network_power_ref_rate: 19.27,
+  energy_fixed_fee: 3.5,
+  energy_variable_rate: 0.1125,
+  network_metering_rate: 5.72,
+  network_power_ref_rate: 19.61,
   network_variable_rate: 0.0510,
   reference_power_kw: 5.0,
   reference_power_windows: [],
-  exceedance_rate: 0.1139,
+  exceedance_rate: 0.0765,
   feed_in_tariff: 0.08,
   consumption_rate_windows: [],
   feed_in_rates: [],
-  compensation_fund_rate: 0.0010,
+  compensation_fund_rate: -0.0010,
   electricity_tax_rate: 0.001,
-  connect_discount: 0,
+  connect_discount: 0.5,
   vat_rate: 0.08,
   currency: "EUR",
 };

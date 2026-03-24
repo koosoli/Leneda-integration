@@ -71,14 +71,14 @@ function hasRealCreds(): boolean {
 
 function defaultBilling(): BillingConfig {
   return {
-    energy_fixed_fee: 1.5,
-    energy_variable_rate: 0.15,
-    network_metering_rate: 5.9,
-    network_power_ref_rate: 19.27,
+    energy_fixed_fee: 3.5,
+    energy_variable_rate: 0.1125,
+    network_metering_rate: 5.72,
+    network_power_ref_rate: 19.61,
     network_variable_rate: 0.051,
     reference_power_kw: 5.0,
     reference_power_windows: [],
-    exceedance_rate: 0.1139,
+    exceedance_rate: 0.0765,
     feed_in_tariff: 0.08,
     consumption_rate_windows: [],
     feed_in_rates: [
@@ -90,14 +90,14 @@ function defaultBilling(): BillingConfig {
     gas_network_variable_rate: 0.012,
     gas_tax_rate: 0.001,
     gas_vat_rate: 0.08,
-    compensation_fund_rate: 0.001,
+    compensation_fund_rate: -0.001,
     electricity_tax_rate: 0.001,
-    connect_discount: 0,
+    connect_discount: 0.5,
     vat_rate: 0.08,
     currency: "EUR",
     meter_has_gas: true,
     meter_monthly_fees: [
-      { meter_id: "LU0000000000000000000000000DEMO01", label: "Smart meter (elec)", fee: 5.9 },
+      { meter_id: "LU0000000000000000000000000DEMO01", label: "Smart meter (elec)", fee: 5.72 },
       { meter_id: "LU0000000000000000000000000DEMO02", label: "Gas meter", fee: 3.5 },
     ],
     meters: [
@@ -120,307 +120,6 @@ function saveBillingToStorage(cfg: BillingConfig): void {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Leneda API direct fetch (browser → api.leneda.eu)
-// ═══════════════════════════════════════════════════════════════
-
-const LENEDA_API = "https://api.leneda.eu";
-
-async function lenedaFetch(endpoint: string, creds: { api_key: string; energy_id: string }): Promise<any> {
-  const resp = await fetch(`${LENEDA_API}${endpoint}`, {
-    headers: {
-      "X-API-KEY": creds.api_key,
-      "X-ENERGY-ID": creds.energy_id,
-    },
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    throw new Error(`Leneda API ${resp.status}: ${resp.statusText} – ${body}`);
-  }
-  return resp.json();
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Meter helpers (mirrors dev-server-plugin.ts)
-// ═══════════════════════════════════════════════════════════════
-
-function meterForObis(obis: string, meters: StoredCreds["meters"]): string {
-  const consumption = meters.find((m) => m.types.includes("consumption"));
-  const production = meters.find((m) => m.types.includes("production"));
-  const gas = meters.find((m) => m.types.includes("gas"));
-  if (obis.startsWith("7-") && gas) return gas.id;
-  if ((/^1-1:2\./.test(obis) || /^1-1:4\./.test(obis) || /^1-65:2\./.test(obis)) && production) return production.id;
-  return consumption?.id ?? meters[0]?.id ?? "";
-}
-
-function allProductionMeters(meters: StoredCreds["meters"]): string[] {
-  const ids = meters.filter((m) => m.types.includes("production")).map((m) => m.id);
-  return ids.length ? ids : [meterForObis("1-1:2.29.0", meters)];
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Date range helper (mirrors dev-server-plugin.ts)
-// ═══════════════════════════════════════════════════════════════
-
-function dateRangeFor(range: string): { start: string; end: string } {
-  const now = new Date();
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-
-  switch (range) {
-    case "yesterday": {
-      const d = new Date(now); d.setDate(d.getDate() - 1);
-      return { start: fmt(d), end: fmt(d) };
-    }
-    case "this_week": {
-      const d = new Date(now);
-      const day = d.getDay() || 7;
-      d.setDate(d.getDate() - day + 1);
-      return { start: fmt(d), end: fmt(now) };
-    }
-    case "last_week": {
-      const d = new Date(now);
-      const day = d.getDay() || 7;
-      const endLW = new Date(d); endLW.setDate(d.getDate() - day);
-      const startLW = new Date(endLW); startLW.setDate(endLW.getDate() - 6);
-      return { start: fmt(startLW), end: fmt(endLW) };
-    }
-    case "this_month": {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { start: fmt(start), end: fmt(now) };
-    }
-    case "last_month": {
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 0);
-      return { start: fmt(start), end: fmt(end) };
-    }
-    case "this_year": {
-      const start = new Date(now.getFullYear(), 0, 1);
-      return { start: fmt(start), end: fmt(now) };
-    }
-    case "last_year": {
-      const start = new Date(now.getFullYear() - 1, 0, 1);
-      const end = new Date(now.getFullYear() - 1, 11, 31);
-      return { start: fmt(start), end: fmt(end) };
-    }
-    default:
-      return dateRangeFor("yesterday");
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Peak / Exceedance helpers (mirrors dev-server-plugin.ts)
-// ═══════════════════════════════════════════════════════════════
-
-function matchesDayGroup(date: Date, dayGroup: string): boolean {
-  if (dayGroup === "weekdays") return date.getDay() >= 1 && date.getDay() <= 5;
-  if (dayGroup === "weekends") return date.getDay() === 0 || date.getDay() === 6;
-  return true;
-}
-
-function toMinutes(value: string): number {
-  const [hours, minutes] = value.split(":").map((part) => parseInt(part, 10) || 0);
-  return hours * 60 + minutes;
-}
-
-function resolveReferencePowerForTimestamp(date: Date, cfg: BillingConfig): number {
-  for (const window of cfg.reference_power_windows ?? []) {
-    if (!matchesDayGroup(date, window.day_group)) continue;
-    const nowMinutes = date.getHours() * 60 + date.getMinutes();
-    const startMinutes = toMinutes(window.start_time);
-    const endMinutes = toMinutes(window.end_time);
-    const inWindow = startMinutes === endMinutes
-      ? true
-      : startMinutes < endMinutes
-        ? nowMinutes >= startMinutes && nowMinutes < endMinutes
-        : nowMinutes >= startMinutes || nowMinutes < endMinutes;
-    if (inWindow) return window.reference_power_kw ?? cfg.reference_power_kw ?? 5;
-  }
-  return cfg.reference_power_kw ?? 5;
-}
-
-function computePeakAndExceedance(
-  items: Array<{ value: number; startedAt?: string }>,
-  cfg: BillingConfig,
-): { peak_power_kw: number; exceedance_kwh: number } {
-  let peak = 0;
-  let exceedance = 0;
-  for (const item of items) {
-    const kw = item.value ?? 0;
-    if (kw > peak) peak = kw;
-    const date = item.startedAt ? new Date(item.startedAt) : new Date();
-    const refPowerKw = resolveReferencePowerForTimestamp(date, cfg);
-    if (kw > refPowerKw) {
-      exceedance += (kw - refPowerKw) * 0.25;
-    }
-  }
-  return {
-    peak_power_kw: Math.round(peak * 100) / 100,
-    exceedance_kwh: Math.round(exceedance * 10000) / 10000,
-  };
-}
-
-async function fetchPeakExceedance(
-  meterId: string,
-  startDate: string,
-  endDate: string,
-  creds: { api_key: string; energy_id: string },
-): Promise<{ peak_power_kw: number; exceedance_kwh: number }> {
-  try {
-    const cfg = loadBilling();
-    const startDt = new Date(startDate + "T00:00:00.000Z").toISOString();
-    const endDt = new Date(endDate + "T23:59:59.999Z").toISOString();
-
-    const data = await lenedaFetch(
-      `/api/metering-points/${meterId}/time-series?obisCode=1-1:1.29.0&startDateTime=${encodeURIComponent(startDt)}&endDateTime=${encodeURIComponent(endDt)}`,
-      creds,
-    );
-    return computePeakAndExceedance(data?.items ?? [], cfg);
-  } catch {
-    return { peak_power_kw: 0, exceedance_kwh: 0 };
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  LIVE data handlers (real Leneda API)
-// ═══════════════════════════════════════════════════════════════
-
-async function liveRangeData(range: string): Promise<RangeData> {
-  const creds = loadCreds()!;
-  const headers = { api_key: creds.api_key, energy_id: creds.energy_id };
-  const { start, end } = dateRangeFor(range);
-  const cMeterId = meterForObis("1-1:1.29.0", creds.meters);
-  const prodMeters = allProductionMeters(creds.meters);
-  const gasMeter = creds.meters.find((m) => m.types.includes("gas"));
-
-  const fetches: Promise<any>[] = [
-    lenedaFetch(`/api/metering-points/${cMeterId}/time-series/aggregated?obisCode=1-1:1.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers),
-  ];
-  for (const pm of prodMeters) {
-    fetches.push(
-      lenedaFetch(`/api/metering-points/${pm}/time-series/aggregated?obisCode=1-1:2.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers).catch(() => null),
-    );
-    fetches.push(
-      lenedaFetch(`/api/metering-points/${pm}/time-series/aggregated?obisCode=1-65:2.29.9&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers).catch(() => null),
-    );
-  }
-  if (gasMeter) {
-    fetches.push(
-      lenedaFetch(`/api/metering-points/${gasMeter.id}/time-series/aggregated?obisCode=7-1:3.1.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers).catch(() => null),
-    );
-  }
-
-  const results = await Promise.all(fetches);
-  const consumption = results[0]?.aggregatedTimeSeries?.[0]?.value ?? 0;
-
-  let production = 0;
-  let exported = 0;
-  for (let i = 0; i < prodMeters.length; i++) {
-    production += results[1 + i * 2]?.aggregatedTimeSeries?.[0]?.value ?? 0;
-    exported += results[2 + i * 2]?.aggregatedTimeSeries?.[0]?.value ?? 0;
-  }
-  const selfConsumed = Math.max(0, production - exported);
-  const gasIdx = 1 + prodMeters.length * 2;
-  const gasEnergy = gasMeter ? (results[gasIdx]?.aggregatedTimeSeries?.[0]?.value ?? 0) : 0;
-
-  const { peak_power_kw, exceedance_kwh } = await fetchPeakExceedance(cMeterId, start, end, headers);
-
-  return {
-    range,
-    consumption,
-    production,
-    exported,
-    self_consumed: selfConsumed,
-    shared: 0,
-    shared_with_me: 0,
-    gas_energy: gasEnergy,
-    gas_volume: 0,
-    peak_power_kw,
-    exceedance_kwh,
-    metering_point: cMeterId,
-  };
-}
-
-async function liveCustomData(start: string, end: string): Promise<CustomRangeData> {
-  const creds = loadCreds()!;
-  const headers = { api_key: creds.api_key, energy_id: creds.energy_id };
-  const cMeterId = meterForObis("1-1:1.29.0", creds.meters);
-  const prodMeters = allProductionMeters(creds.meters);
-
-  const fetches: Promise<any>[] = [
-    lenedaFetch(`/api/metering-points/${cMeterId}/time-series/aggregated?obisCode=1-1:1.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers),
-  ];
-  for (const pm of prodMeters) {
-    fetches.push(
-      lenedaFetch(`/api/metering-points/${pm}/time-series/aggregated?obisCode=1-1:2.29.0&startDate=${start}&endDate=${end}&aggregationLevel=Infinite&transformationMode=Accumulation`, headers).catch(() => null),
-    );
-  }
-  const results = await Promise.all(fetches);
-  let production = 0;
-  for (let i = 0; i < prodMeters.length; i++) {
-    production += results[1 + i]?.aggregatedTimeSeries?.[0]?.value ?? 0;
-  }
-
-  const { peak_power_kw, exceedance_kwh } = await fetchPeakExceedance(cMeterId, start, end, headers);
-
-  return {
-    consumption: results[0]?.aggregatedTimeSeries?.[0]?.value ?? 0,
-    production,
-    peak_power_kw,
-    exceedance_kwh,
-    start,
-    end,
-  };
-}
-
-async function liveTimeseries(obis: string, start?: string, end?: string): Promise<TimeseriesResponse> {
-  const creds = loadCreds()!;
-  const headers = { api_key: creds.api_key, energy_id: creds.energy_id };
-
-  const now = new Date();
-  const defStart = new Date(now); defStart.setDate(defStart.getDate() - 1); defStart.setHours(0, 0, 0, 0);
-  const defEnd = new Date(defStart); defEnd.setHours(23, 59, 59, 999);
-
-  const s = start ?? defStart.toISOString();
-  const e = end ?? defEnd.toISOString();
-
-  const isProdObis = /^1-1:2\./.test(obis) || /^1-1:4\./.test(obis) || /^1-65:2\./.test(obis);
-  const metersToQuery = isProdObis ? allProductionMeters(creds.meters) : [meterForObis(obis, creds.meters)];
-
-  const fetches = metersToQuery.map((m) =>
-    lenedaFetch(
-      `/api/metering-points/${m}/time-series?obisCode=${encodeURIComponent(obis)}&startDateTime=${encodeURIComponent(s)}&endDateTime=${encodeURIComponent(e)}`,
-      headers,
-    ).catch(() => null),
-  );
-  const results = await Promise.all(fetches);
-
-  const merged = new Map<string, number>();
-  let unit = "kW";
-  let interval = "PT15M";
-  for (const data of results) {
-    if (!data) continue;
-    unit = data.unit ?? unit;
-    interval = data.intervalLength ?? interval;
-    for (const item of data.items ?? []) {
-      merged.set(item.startedAt, (merged.get(item.startedAt) ?? 0) + item.value);
-    }
-  }
-
-  const items = [...merged.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([ts, val]) => ({ value: val, startedAt: ts, type: "measured", version: 1, calculated: false }));
-
-  return { obis, unit, interval, items };
-}
-
-async function liveSensors(): Promise<SensorsResponse> {
-  const creds = loadCreds()!;
-  return {
-    metering_point: creds.meters[0]?.id ?? "",
-    sensors: [{ key: "live_web", value: null, name: "Live mode \u2013 sensors available in Home Assistant", unit: "", peak_timestamp: null }],
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════
 //  MOCK data (when no real credentials)
 // ═══════════════════════════════════════════════════════════════
 
@@ -436,13 +135,13 @@ function yesterdayRange(): { start: Date; end: Date } {
 }
 
 const RANGE_DATA: Record<string, RangeData> = {
-  yesterday: { range: "yesterday", consumption: 12.34, production: 8.76, exported: 5.21, self_consumed: 3.55, shared: 1.8, shared_with_me: 2.1, peak_power_kw: 3.42, exceedance_kwh: 0, gas_energy: 24.5, gas_volume: 2.31, metering_point: "LU0000000000000000000000000DEMO01" },
-  this_week: { range: "this_week", consumption: 68.9, production: 45.2, exported: 27.1, self_consumed: 18.1, shared: 9.4, shared_with_me: 11.2, peak_power_kw: 4.1, exceedance_kwh: 0, gas_energy: 142.3, gas_volume: 13.4, metering_point: "LU0000000000000000000000000DEMO01" },
-  last_week: { range: "last_week", consumption: 82.5, production: 52.8, exported: 31.6, self_consumed: 21.2, shared: 12.3, shared_with_me: 14.6, peak_power_kw: 5.8, exceedance_kwh: 0.82, gas_energy: 168.7, gas_volume: 15.9, metering_point: "LU0000000000000000000000000DEMO01" },
-  this_month: { range: "this_month", consumption: 245.6, production: 178.4, exported: 106.9, self_consumed: 71.5, shared: 38.2, shared_with_me: 44.0, peak_power_kw: 6.2, exceedance_kwh: 3.45, gas_energy: 512.3, gas_volume: 48.3, metering_point: "LU0000000000000000000000000DEMO01" },
-  last_month: { range: "last_month", consumption: 310.2, production: 198.7, exported: 119.2, self_consumed: 79.5, shared: 42.8, shared_with_me: 50.1, peak_power_kw: 5.5, exceedance_kwh: 1.92, gas_energy: 620.1, gas_volume: 58.5, metering_point: "LU0000000000000000000000000DEMO01" },
-  this_year: { range: "this_year", consumption: 1845.2, production: 1320.8, exported: 792.5, self_consumed: 528.3, shared: 283.1, shared_with_me: 330.4, peak_power_kw: 7.1, exceedance_kwh: 12.6, gas_energy: 4210.5, gas_volume: 397.2, metering_point: "LU0000000000000000000000000DEMO01" },
-  last_year: { range: "last_year", consumption: 4120.8, production: 3015.6, exported: 1809.4, self_consumed: 1206.2, shared: 645.9, shared_with_me: 754.2, peak_power_kw: 8.3, exceedance_kwh: 28.4, gas_energy: 9580.2, gas_volume: 903.8, metering_point: "LU0000000000000000000000000DEMO01" },
+  yesterday: { range: "yesterday", consumption: 12.34, production: 8.76, exported: 3.41, self_consumed: 3.55, direct_solar_to_home: 3.55, solar_to_home: 5.65, grid_import: 6.69, shared: 1.8, shared_with_me: 2.1, peak_power_kw: 3.42, exceedance_kwh: 0, gas_energy: 24.5, gas_volume: 2.31, metering_point: "LU0000000000000000000000000DEMO01" },
+  this_week: { range: "this_week", consumption: 68.9, production: 45.2, exported: 17.7, self_consumed: 18.1, direct_solar_to_home: 18.1, solar_to_home: 29.3, grid_import: 39.6, shared: 9.4, shared_with_me: 11.2, peak_power_kw: 4.1, exceedance_kwh: 0, gas_energy: 142.3, gas_volume: 13.4, metering_point: "LU0000000000000000000000000DEMO01" },
+  last_week: { range: "last_week", consumption: 82.5, production: 52.8, exported: 19.3, self_consumed: 21.2, direct_solar_to_home: 21.2, solar_to_home: 35.8, grid_import: 46.7, shared: 12.3, shared_with_me: 14.6, peak_power_kw: 5.8, exceedance_kwh: 0.82, gas_energy: 168.7, gas_volume: 15.9, metering_point: "LU0000000000000000000000000DEMO01" },
+  this_month: { range: "this_month", consumption: 245.6, production: 178.4, exported: 68.7, self_consumed: 71.5, direct_solar_to_home: 71.5, solar_to_home: 115.5, grid_import: 130.1, shared: 38.2, shared_with_me: 44.0, peak_power_kw: 6.2, exceedance_kwh: 3.45, gas_energy: 512.3, gas_volume: 48.3, metering_point: "LU0000000000000000000000000DEMO01" },
+  last_month: { range: "last_month", consumption: 310.2, production: 198.7, exported: 76.4, self_consumed: 79.5, direct_solar_to_home: 79.5, solar_to_home: 129.6, grid_import: 180.6, shared: 42.8, shared_with_me: 50.1, peak_power_kw: 5.5, exceedance_kwh: 1.92, gas_energy: 620.1, gas_volume: 58.5, metering_point: "LU0000000000000000000000000DEMO01" },
+  this_year: { range: "this_year", consumption: 1845.2, production: 1320.8, exported: 509.4, self_consumed: 528.3, direct_solar_to_home: 528.3, solar_to_home: 858.7, grid_import: 986.5, shared: 283.1, shared_with_me: 330.4, peak_power_kw: 7.1, exceedance_kwh: 12.6, gas_energy: 4210.5, gas_volume: 397.2, metering_point: "LU0000000000000000000000000DEMO01" },
+  last_year: { range: "last_year", consumption: 4120.8, production: 3015.6, exported: 1163.5, self_consumed: 1206.2, direct_solar_to_home: 1206.2, solar_to_home: 1960.4, grid_import: 2160.4, shared: 645.9, shared_with_me: 754.2, peak_power_kw: 8.3, exceedance_kwh: 28.4, gas_energy: 9580.2, gas_volume: 903.8, metering_point: "LU0000000000000000000000000DEMO01" },
 };
 
 const MOCK_SENSORS: SensorsResponse = {
@@ -529,17 +228,12 @@ export const demo = {
     if (!testKey || !testEnergyId || !firstId) {
       return { success: false, message: "Missing API key, energy ID, or metering point" };
     }
-    try {
-      const yd = new Date(); yd.setDate(yd.getDate() - 1);
-      const dt = yd.toISOString().slice(0, 10);
-      await lenedaFetch(
-        `/api/metering-points/${firstId}/time-series/aggregated?obisCode=1-1:1.29.0&startDate=${dt}&endDate=${dt}&aggregationLevel=Infinite&transformationMode=Accumulation`,
-        { api_key: testKey, energy_id: testEnergyId },
-      );
-      return { success: true, message: `Connection successful! Tested meter \u2026${firstId.slice(-8)}` };
-    } catch (e: any) {
-      return { success: false, message: `Connection failed: ${e.message}` };
-    }
+
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({ success: true, message: `Connection successful! Tested meter …${firstId.slice(-8)} (Demo Mode)` });
+      }, 800);
+    });
   },
 
   // ── Config ────────────────────────────────────────────────────
@@ -563,47 +257,21 @@ export const demo = {
     saveBillingToStorage(defaultBilling());
   },
 
-  // ── Data (live if credentials, otherwise mock) ────────────────
+  // ── Data (strictly mock) ────────────────
   async fetchRangeData(range: string): Promise<RangeData> {
-    if (hasRealCreds()) return liveRangeData(range);
     return RANGE_DATA[range] ?? RANGE_DATA.yesterday;
   },
 
   async fetchCustomData(start: string, end: string): Promise<CustomRangeData> {
-    if (hasRealCreds()) return liveCustomData(start, end);
     return { consumption: 42.5, production: 28.3, peak_power_kw: 5.8, exceedance_kwh: 1.24, start, end };
   },
 
   async fetchTimeseries(obis: string, start?: string, end?: string): Promise<TimeseriesResponse> {
-    if (hasRealCreds()) return liveTimeseries(obis, start, end);
     const base = obis.includes(":2.29.0") ? 4.5 : 2.0;
     return generateTimeseries(obis, base, start ? new Date(start) : undefined, end ? new Date(end) : undefined);
   },
 
   async fetchPerMeterTimeseries(obis: string, start?: string, end?: string): Promise<PerMeterTimeseriesResponse> {
-    if (hasRealCreds()) {
-      const creds = loadCreds()!;
-      const headers = { api_key: creds.api_key, energy_id: creds.energy_id };
-      const prodMeters = allProductionMeters(creds.meters);
-      const s = start ?? yesterdayRange().start.toISOString();
-      const e = end ?? yesterdayRange().end.toISOString();
-
-      const fetches = prodMeters.map((m) =>
-        lenedaFetch(`/api/metering-points/${m}/time-series?obisCode=${encodeURIComponent(obis)}&startDateTime=${encodeURIComponent(s)}&endDateTime=${encodeURIComponent(e)}`, headers).catch(() => null)
-      );
-      const results = await Promise.all(fetches);
-
-      return {
-        obis,
-        meters: prodMeters.map((mid, idx) => ({
-          meter_id: mid,
-          unit: results[idx]?.unit ?? "kW",
-          interval: results[idx]?.intervalLength ?? "PT15M",
-          items: results[idx]?.items ?? [],
-        })),
-      };
-    }
-
     // Static mock: split the single mock timeseries into two fake meters
     const t = generateTimeseries(obis, 4.5, start ? new Date(start) : undefined, end ? new Date(end) : undefined);
     const m1 = JSON.parse(JSON.stringify(t));
@@ -621,7 +289,6 @@ export const demo = {
   },
 
   async fetchSensors(): Promise<SensorsResponse> {
-    if (hasRealCreds()) return liveSensors();
     return MOCK_SENSORS;
   },
 };

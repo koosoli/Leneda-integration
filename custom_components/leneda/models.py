@@ -20,14 +20,14 @@ class BillingConfig:
     - connect_discount: monthly contract discount/credit applied before VAT
     - vat_rate: VAT as decimal (0.08 = 8%)
     """
-    energy_fixed_fee: float = 1.50
-    energy_variable_rate: float = 0.1500
-    network_metering_rate: float = 5.90
-    network_power_ref_rate: float = 19.27
+    energy_fixed_fee: float = 3.50
+    energy_variable_rate: float = 0.1125
+    network_metering_rate: float = 5.72
+    network_power_ref_rate: float = 19.61
     network_variable_rate: float = 0.0510
     reference_power_kw: float = 5.0
     reference_power_windows: list = field(default_factory=list)  # [{label, day_group, start_time, end_time, reference_power_kw}]
-    exceedance_rate: float = 0.1139
+    exceedance_rate: float = 0.0765
     feed_in_tariff: float = 0.08
     consumption_rate_windows: list = field(default_factory=list)  # [{label, day_group, start_time, end_time, rate}]
     feed_in_rates: list = field(default_factory=list)  # [{meter_id, mode, tariff, sensor_entity}]
@@ -38,9 +38,9 @@ class BillingConfig:
     gas_network_variable_rate: float = 0.0120
     gas_tax_rate: float = 0.0010
     gas_vat_rate: float = 0.08
-    compensation_fund_rate: float = 0.0010
+    compensation_fund_rate: float = -0.0010
     electricity_tax_rate: float = 0.0010
-    connect_discount: float = 0.0
+    connect_discount: float = 0.50
     vat_rate: float = 0.08
     currency: str = "EUR"
     meter_has_gas: bool = False
@@ -85,37 +85,83 @@ class BillingConfig:
     @classmethod
     def from_dict(cls, data: dict) -> BillingConfig:
         """Create from dict."""
+        migrated = cls._migrate_legacy_defaults(data)
         return cls(
-            energy_fixed_fee=data.get("energy_fixed_fee", 1.50),
-            energy_variable_rate=data.get("energy_variable_rate", 0.1500),
-            network_metering_rate=data.get("network_metering_rate", 5.90),
-            network_power_ref_rate=data.get("network_power_ref_rate", 19.27),
-            network_variable_rate=data.get("network_variable_rate", 0.0510),
-            reference_power_kw=data.get("reference_power_kw", 5.0),
-            reference_power_windows=data.get("reference_power_windows", []),
-            exceedance_rate=data.get("exceedance_rate", 0.1139),
-            feed_in_tariff=data.get("feed_in_tariff", 0.08),
-            consumption_rate_windows=data.get("consumption_rate_windows", []),
-            feed_in_rates=cls._migrate_feed_in_rates(data),
-            meter_monthly_fees=data.get("meter_monthly_fees", []),
-            gas_fixed_fee=data.get("gas_fixed_fee", 6.50),
-            gas_variable_rate=data.get("gas_variable_rate", 0.0550),
-            gas_network_fee=data.get("gas_network_fee", 4.80),
-            gas_network_variable_rate=data.get("gas_network_variable_rate", 0.0120),
-            gas_tax_rate=data.get("gas_tax_rate", 0.0010),
-            gas_vat_rate=data.get("gas_vat_rate", 0.08),
-            compensation_fund_rate=data.get("compensation_fund_rate", 0.0010),
-            electricity_tax_rate=data.get("electricity_tax_rate", 0.0010),
-            connect_discount=data.get("connect_discount", 0.0),
-            vat_rate=data.get("vat_rate", 0.08),
-            currency=data.get("currency", "EUR"),
-            meter_has_gas=data.get("meter_has_gas", False),
-            api_key=data.get("api_key", ""),
-            energy_id=data.get("energy_id", ""),
-            meters=data.get("meters", [
+            energy_fixed_fee=cls._coerce_float(migrated.get("energy_fixed_fee"), 3.50),
+            energy_variable_rate=cls._coerce_float(migrated.get("energy_variable_rate"), 0.1125),
+            network_metering_rate=cls._coerce_float(migrated.get("network_metering_rate"), 5.72),
+            network_power_ref_rate=cls._coerce_float(migrated.get("network_power_ref_rate"), 19.61),
+            network_variable_rate=cls._coerce_float(migrated.get("network_variable_rate"), 0.0510),
+            reference_power_kw=cls._coerce_float(migrated.get("reference_power_kw"), 5.0),
+            reference_power_windows=migrated.get("reference_power_windows", []),
+            exceedance_rate=cls._coerce_float(migrated.get("exceedance_rate"), 0.0765),
+            feed_in_tariff=cls._coerce_float(migrated.get("feed_in_tariff"), 0.08),
+            consumption_rate_windows=migrated.get("consumption_rate_windows", []),
+            feed_in_rates=cls._migrate_feed_in_rates(migrated),
+            meter_monthly_fees=migrated.get("meter_monthly_fees", []),
+            gas_fixed_fee=cls._coerce_float(migrated.get("gas_fixed_fee"), 6.50),
+            gas_variable_rate=cls._coerce_float(migrated.get("gas_variable_rate"), 0.0550),
+            gas_network_fee=cls._coerce_float(migrated.get("gas_network_fee"), 4.80),
+            gas_network_variable_rate=cls._coerce_float(migrated.get("gas_network_variable_rate"), 0.0120),
+            gas_tax_rate=cls._coerce_float(migrated.get("gas_tax_rate"), 0.0010),
+            gas_vat_rate=cls._coerce_float(migrated.get("gas_vat_rate"), 0.08),
+            compensation_fund_rate=cls._coerce_float(migrated.get("compensation_fund_rate"), -0.0010),
+            electricity_tax_rate=cls._coerce_float(migrated.get("electricity_tax_rate"), 0.0010),
+            connect_discount=cls._coerce_float(migrated.get("connect_discount"), 0.50),
+            vat_rate=cls._coerce_float(migrated.get("vat_rate"), 0.08),
+            currency=cls._coerce_str(migrated.get("currency"), "EUR"),
+            meter_has_gas=bool(migrated.get("meter_has_gas", False)),
+            api_key=migrated.get("api_key", ""),
+            energy_id=migrated.get("energy_id", ""),
+            meters=migrated.get("meters", [
                 {"id": "", "types": ["consumption"]}
             ]),
         )
+
+    @staticmethod
+    def _coerce_float(value: object, default: float) -> float:
+        """Return a numeric config value, falling back when persisted data is blank/invalid."""
+        try:
+            if value in (None, ""):
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _coerce_str(value: object, default: str) -> str:
+        """Return a non-empty string config value."""
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return default
+
+    @classmethod
+    def _migrate_legacy_defaults(cls, data: dict) -> dict:
+        """Promote untouched legacy factory defaults to the current invoice defaults."""
+        migrated = dict(data)
+        legacy_defaults = {
+            "energy_fixed_fee": 1.50,
+            "energy_variable_rate": 0.1500,
+            "network_metering_rate": 5.90,
+            "network_power_ref_rate": 19.27,
+            "network_variable_rate": 0.0510,
+            "exceedance_rate": 0.1139,
+            "compensation_fund_rate": 0.0010,
+            "electricity_tax_rate": 0.0010,
+            "connect_discount": 0.0,
+            "vat_rate": 0.08,
+        }
+        if all(migrated.get(key, default) == default for key, default in legacy_defaults.items()):
+            migrated.update({
+                "energy_fixed_fee": 3.50,
+                "energy_variable_rate": 0.1125,
+                "network_metering_rate": 5.72,
+                "network_power_ref_rate": 19.61,
+                "exceedance_rate": 0.0765,
+                "compensation_fund_rate": -0.0010,
+                "connect_discount": 0.50,
+            })
+        return migrated
 
     @classmethod
     def _migrate_feed_in_rates(cls, data: dict) -> list:
