@@ -184,6 +184,17 @@ export interface Credentials {
   meters: MeterConfig[];
 }
 
+function normalizeCredentials(creds: Credentials): Credentials {
+  return {
+    api_key: (creds.api_key ?? "").trim(),
+    energy_id: (creds.energy_id ?? "").trim(),
+    meters: (creds.meters ?? []).map((meter) => ({
+      ...meter,
+      id: (meter.id ?? "").trim(),
+    })),
+  };
+}
+
 // ── HA Auth Token Extraction ────────────────────────────────────
 
 /**
@@ -317,24 +328,31 @@ export async function fetchCredentials(): Promise<Credentials> {
 }
 
 export async function saveCredentials(creds: Credentials): Promise<void> {
-  if (IS_DEMO) return (await getDemoApi()).saveCredentials(creds);
+  const normalized = normalizeCredentials(creds);
+  if (IS_DEMO) return (await getDemoApi()).saveCredentials(normalized);
   await apiFetch<{ status: string }>("/leneda_api/credentials", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(creds),
+    body: JSON.stringify(normalized),
   });
 }
 
 export async function testCredentials(
   creds: Credentials,
 ): Promise<{ success: boolean; message: string }> {
-  if (IS_DEMO) return (await getDemoApi()).testCredentials(creds);
+  const normalized = normalizeCredentials(creds);
+  if (IS_DEMO) return (await getDemoApi()).testCredentials(normalized);
   return apiFetch<{ success: boolean; message: string }>(
     "/leneda_api/credentials/test",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(creds),
+      body: JSON.stringify(normalized),
     },
   );
+}
+
+export async function fetchHAEntities(): Promise<{ entities: string[] }> {
+  if (IS_DEMO) return { entities: [] };
+  return apiFetch<{ entities: string[] }>("/leneda_api/ha-entities");
 }

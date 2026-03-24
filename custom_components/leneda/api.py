@@ -43,8 +43,8 @@ class LenedaApiClient:
     def __init__(self, session: aiohttp.ClientSession, api_key: str, energy_id: str):
         """Initialize the API client."""
         self._session = session
-        self._api_key = api_key
-        self._energy_id = energy_id
+        self._api_key = api_key.strip()
+        self._energy_id = energy_id.strip()
 
     async def async_get_metering_data(
         self,
@@ -72,6 +72,7 @@ class LenedaApiClient:
             aiohttp.ClientResponseError: For HTTP errors (401, 403, etc.)
             aiohttp.ClientError: For network connectivity issues
         """
+        metering_point_id = metering_point_id.strip()
         headers = {"X-API-KEY": self._api_key, "X-ENERGY-ID": self._energy_id}
         params = {
             "startDateTime": start_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -111,6 +112,7 @@ class LenedaApiClient:
             Dict with 'aggregatedTimeSeries' containing aggregated values
             and 'unit' showing the measurement unit (typically kWh)
         """
+        metering_point_id = metering_point_id.strip()
         headers = {"X-API-KEY": self._api_key, "X-ENERGY-ID": self._energy_id}
         params = {
             "startDate": start_date.strftime("%Y-%m-%d"),
@@ -133,6 +135,7 @@ class LenedaApiClient:
 
     async def test_credentials(self, metering_point_id: str) -> bool:
         """Test credentials against the Leneda API."""
+        metering_point_id = metering_point_id.strip()
         now = dt_util.utcnow()
         start_date = now - timedelta(hours=25)
         end_date = now
