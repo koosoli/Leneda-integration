@@ -4,6 +4,19 @@ All notable changes to the **Leneda HACS Integration** will be documented in thi
 
 ## [Unreleased]
 
+## [v2.1.1] - 2026-03-24
+
+### Bug Fixes
+- **Preset Period Visibility:** Preset ranges such as `Last Week` and `Last Month` now keep their actual `From` and `To` dates visible in the dashboard and invoice period header so the selected window can be verified directly.
+- **Energy Flow Totals:** Fixed preset and live range mapping so `Solar to home`, `Bought from grid`, and `Grid export` use the Leneda-covered and remaining-consumption values instead of being recomputed from incomplete fallback math.
+- **Solar-Shaved Exceedance:** Corrected exceedance calculations to use net house load per interval after concurrent solar production is deducted, matching the intended power-shaving behavior.
+- **Missing Data State:** Failed API fetches now clear stale totals and show `Missing Data` instead of leaving old consumption values visible.
+- **Config Number Recovery:** Blank numeric billing settings are normalized back to defaults so supplier, network, and exceedance fields do not stay empty after an incomplete save.
+
+### Improvements
+- **Default Graph Unit:** The dashboard now opens in `kWh` view by default instead of `kW`.
+- **Local Dev Parity:** The localhost dev API now returns preset period dates and the same range breakdown fields used by Home Assistant, making local verification match the integration behavior more closely.
+
 ## [v2.1.0] - 2026-03-24
 
 ### Bug Fixes
