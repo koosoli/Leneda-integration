@@ -4,6 +4,17 @@ All notable changes to the **Leneda HACS Integration** will be documented in thi
 
 ## [Unreleased]
 
+## [v2.1.0] - 2026-03-24
+
+### Bug Fixes
+- **Energy Flow Mapping:** Aligned dashboard energy-flow calculations with invoice and billing data so `consumption` reflects energy bought from the grid and market export remains `exported - shared`.
+- **Solar-to-Home Totals:** Fixed solar-to-home reporting so direct self-consumption is calculated from on-site production while energy received through community sharing is included in the displayed home-supplied total.
+- **Self-Sufficiency Accuracy:** Recalculated self-sufficiency from the full mix of home energy sources, combining bought-from-grid energy with direct and community-supplied solar usage.
+
+### Improvements
+- **Dashboard Terminology:** Renamed `Daily Consumption` to `Period Consumption` and `Grid import` to `Bought from grid` to match non-daily views and billing terminology.
+- **Legend Clarity:** Updated the energy-flow legend to clearly show that community-received energy is included in `Solar to home`.
+
 ## [v2.0.5] - 2026-03-09
 
 ### Bug Fixes
