@@ -451,6 +451,7 @@ class LenedaCustomDataView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
+        obis = request.query.get("obis", "1-1:1.29.0")
         start_str = request.query.get("start")
         end_str = request.query.get("end")
 
