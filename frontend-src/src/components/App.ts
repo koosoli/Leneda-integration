@@ -7,6 +7,7 @@ import {
   fetchRangeData,
   fetchSensors,
   fetchConfig,
+  fetchHAEntities,
   fetchMode,
   fetchCredentials,
   fetchTimeseries,
@@ -132,7 +133,7 @@ export class LenedaApp {
         // Not configured — send user to Settings to enter credentials
         this.state.tab = "settings";
         this.state.loading = false;
-        this.state.error = "Please configure your Leneda API credentials in Settings.";
+        this.state.error = null;
         this.render();
         return;
       }
@@ -787,8 +788,7 @@ export class LenedaApp {
     if (this.state.mode === "ha") {
       const datalist = this.root.querySelector("#ha-entity-list") as HTMLDataListElement | null;
       if (datalist) {
-        fetch("/api/leneda/ha-entities")
-          .then((r) => r.ok ? r.json() as Promise<{ entities: string[] }> : Promise.resolve({ entities: [] }))
+        fetchHAEntities()
           .then(({ entities }) => {
             datalist.innerHTML = entities
               .map((e: string) => `<option value="${e}"></option>`)

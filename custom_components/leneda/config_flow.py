@@ -20,6 +20,19 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_user_input(user_input: dict) -> dict:
+    """Trim credential and metering-point fields before validation/storage."""
+    normalized = dict(user_input)
+    normalized[CONF_API_KEY] = (normalized.get(CONF_API_KEY) or "").strip()
+    normalized[CONF_ENERGY_ID] = (normalized.get(CONF_ENERGY_ID) or "").strip()
+    normalized[CONF_METERING_POINT_ID] = (normalized.get(CONF_METERING_POINT_ID) or "").strip()
+
+    for id_key, _types_key in EXTRA_METER_SLOTS:
+        normalized[id_key] = (normalized.get(id_key) or "").strip()
+
+    return normalized
+
+
 class LenedaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Leneda."""
 
@@ -45,6 +58,7 @@ class LenedaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         if user_input is not None:
+            user_input = _normalize_user_input(user_input)
             # Validation: Ensure either entity or static value is provided, but not both.
             ref_entity = user_input.get(CONF_REFERENCE_POWER_ENTITY)
             ref_static = user_input.get(CONF_REFERENCE_POWER_STATIC)
