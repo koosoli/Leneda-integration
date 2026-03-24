@@ -32,24 +32,26 @@ export function renderDashboard(state: AppState): string {
   const gasVolume = d?.gas_volume ?? 0;
   const peakPower = d?.peak_power_kw ?? 0;
 
-  // Luxembourg energy flow model (derived from available data)
-  const boughtFromMarket = Math.max(0, consumption - selfConsumed - (d?.shared_with_me ?? 0));
+  // Luxembourg energy flow model (aligned with invoice/billing data)
+  const sharedWithMe = d?.shared_with_me ?? 0;
+  const directSolarToHome = Math.min(production, selfConsumed);
+  const solarToHome = directSolarToHome + sharedWithMe;
+  const boughtFromGrid = consumption;
   const soldToMarket = Math.max(0, exported - (d?.shared ?? 0));
   const shared = d?.shared ?? 0;
-  const sharedWithMe = d?.shared_with_me ?? 0;
-  const solarToHome = Math.min(production, selfConsumed);
+  const totalHomeEnergy = boughtFromGrid + solarToHome;
 
   // Self-sufficiency
   const selfSufficiency =
-    consumption > 0 ? Math.min(100, (selfConsumed / consumption) * 100) : 0;
+    totalHomeEnergy > 0 ? Math.min(100, (solarToHome / totalHomeEnergy) * 100) : 0;
 
   const maxFlowValue = Math.max(
     production,
-    boughtFromMarket,
+    boughtFromGrid,
     soldToMarket,
     shared,
     sharedWithMe,
-    solarToHome,
+    directSolarToHome,
     1,
   );
 
@@ -165,7 +167,7 @@ export function renderDashboard(state: AppState): string {
             <div class="elite-header">
               <div class="glass-module consumption-module">
                 <div class="module-info">
-                  <span class="module-label">Daily Consumption <span class="info-icon">ⓘ</span></span>
+                  <span class="module-label">Period Consumption <span class="info-icon">ⓘ</span></span>
                   <div class="module-value-row">
                     <span class="module-value highlight-red">${fmtNum(consumption)}</span>
                     <span class="module-unit">kWh</span>
@@ -261,7 +263,7 @@ export function renderDashboard(state: AppState): string {
                 <g class="scene-node-label" transform="translate(54, 108)">
                   <rect width="118" height="52" rx="16" fill="var(--clr-overlay)" stroke="rgba(248, 81, 73, 0.24)" />
                   <text x="16" y="22" class="scene-node-kicker">Grid</text>
-                  <text x="16" y="38" class="scene-node-value">${fmtNum(boughtFromMarket + soldToMarket)} kWh</text>
+                  <text x="16" y="38" class="scene-node-value">${fmtNum(boughtFromGrid + soldToMarket)} kWh</text>
                 </g>
 
                 <g class="scene-node-label" transform="translate(338, 44)">
@@ -320,17 +322,17 @@ export function renderDashboard(state: AppState): string {
                   </g>
                 </g>
 
-                <path d="M 560 98 C 520 102 474 130 434 182" stroke="url(#flow-solar)" stroke-width="${flowWidth(solarToHome)}" stroke-opacity="${flowOpacity(solarToHome)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-green)" />
-                ${solarToHome > 0 ? `
-                  <circle r="${flowRadius(solarToHome)}" fill="var(--clr-production)" filter="url(#glow-green)">
-                    <animateMotion dur="${flowDuration(solarToHome)}" repeatCount="indefinite" path="M 560 98 C 520 102 474 130 434 182" />
+                <path d="M 560 98 C 520 102 474 130 434 182" stroke="url(#flow-solar)" stroke-width="${flowWidth(directSolarToHome)}" stroke-opacity="${flowOpacity(directSolarToHome)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-green)" />
+                ${directSolarToHome > 0 ? `
+                  <circle r="${flowRadius(directSolarToHome)}" fill="var(--clr-production)" filter="url(#glow-green)">
+                    <animateMotion dur="${flowDuration(directSolarToHome)}" repeatCount="indefinite" path="M 560 98 C 520 102 474 130 434 182" />
                   </circle>
                 ` : ""}
 
-                <path d="M 146 224 C 226 224 298 224 354 214" stroke="url(#flow-grid-in)" stroke-width="${flowWidth(boughtFromMarket)}" stroke-opacity="${flowOpacity(boughtFromMarket)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-red)" />
-                ${boughtFromMarket > 0 ? `
-                  <circle r="${flowRadius(boughtFromMarket)}" fill="var(--clr-consumption)" filter="url(#glow-red)">
-                    <animateMotion dur="${flowDuration(boughtFromMarket)}" repeatCount="indefinite" path="M 146 224 C 226 224 298 224 354 214" />
+                <path d="M 146 224 C 226 224 298 224 354 214" stroke="url(#flow-grid-in)" stroke-width="${flowWidth(boughtFromGrid)}" stroke-opacity="${flowOpacity(boughtFromGrid)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-red)" />
+                ${boughtFromGrid > 0 ? `
+                  <circle r="${flowRadius(boughtFromGrid)}" fill="var(--clr-consumption)" filter="url(#glow-red)">
+                    <animateMotion dur="${flowDuration(boughtFromGrid)}" repeatCount="indefinite" path="M 146 224 C 226 224 298 224 354 214" />
                   </circle>
                 ` : ""}
 
@@ -362,14 +364,14 @@ export function renderDashboard(state: AppState): string {
                 <span class="flow-legend-dot"></span>
                 <span class="flow-legend-copy">
                   <strong>Solar to home</strong>
-                  <span>${fmtNum(solarToHome)} kWh used directly in the house</span>
+                  <span>${fmtNum(solarToHome)} kWh used in the house${sharedWithMe > 0 ? ` (${fmtNum(directSolarToHome)} direct + ${fmtNum(sharedWithMe)} via community)` : ""}</span>
                 </span>
               </div>
               <div class="flow-legend-item import">
                 <span class="flow-legend-dot"></span>
                 <span class="flow-legend-copy">
-                  <strong>Grid import</strong>
-                  <span>${fmtNum(boughtFromMarket)} kWh bought from the market</span>
+                  <strong>Bought from grid</strong>
+                  <span>${fmtNum(boughtFromGrid)} kWh bought from the grid</span>
                 </span>
               </div>
               <div class="flow-legend-item export">
@@ -383,7 +385,7 @@ export function renderDashboard(state: AppState): string {
                 <span class="flow-legend-dot"></span>
                 <span class="flow-legend-copy">
                   <strong>Community exchange</strong>
-                  <span>${fmtNum(shared)} kWh sent · ${fmtNum(sharedWithMe)} kWh received</span>
+                  <span>${fmtNum(shared)} kWh sent · ${fmtNum(sharedWithMe)} kWh received${sharedWithMe > 0 ? " (included in solar to home)" : ""}</span>
                 </span>
               </div>
             </div>
