@@ -39,11 +39,11 @@ export function renderDashboard(state: AppState): string {
   const boughtFromGrid = consumption;
   const soldToMarket = Math.max(0, exported - (d?.shared ?? 0));
   const shared = d?.shared ?? 0;
-  const totalHomeUsage = boughtFromGrid + solarToHome;
+  const totalHomeEnergy = boughtFromGrid + solarToHome;
 
   // Self-sufficiency
   const selfSufficiency =
-    totalHomeUsage > 0 ? Math.min(100, (solarToHome / totalHomeUsage) * 100) : 0;
+    totalHomeEnergy > 0 ? Math.min(100, (solarToHome / totalHomeEnergy) * 100) : 0;
 
   const maxFlowValue = Math.max(
     production,
