@@ -2,7 +2,20 @@
 
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
-## [Unreleased]
+
+## [v2.2.0] - 2026-04-15
+
+### New Features
+- **Invoice Period Selector:** Added the full period selector directly to the Invoice tab, including custom date selection and visible preset start/end dates, so invoice checks no longer depend on switching back to the dashboard.
+- **Reference Power Level Comparison:** Added a Creos-style comparison table that recalculates the selected period across the standard low-voltage reference power levels and highlights the financially optimal level.
+
+### Improvements
+- **Reference Power Terminology:** Updated invoice and settings wording toward Creos terminology, including `reference power level`, `fixed charge`, `volumetric charge`, and `exceedance charge`.
+- **Fixed Fee Proration Accuracy:** Monthly fixed charges in the invoice are now prorated day by day across the actual selected period, including custom ranges that span multiple months.
+- **Energy Flow Visual Refresh:** Reworked the dashboard energy-flow scene to replace oversized arrows with slimmer layered energy lanes, softer lighting, and cleaner motion so the graphic feels more polished while staying easy to read.
+- **Mobile Dashboard Layout:** Improved small-screen handling for dashboard date controls and the flow card, including wrapped range buttons and a compact phone-specific energy-flow summary, so the interface stays readable on phones without label collisions or sideways scrolling.
+- **Mobile Invoice Layout:** Reworked invoice, gas, solar, and reference power sections into stacked mobile cards so billing details stay readable on phones without horizontal scrolling.
+- **Print-Friendly Invoice Output:** Added a dedicated `Print Invoice` action and print-specific layout rules that hide the app chrome and format the selected invoice view cleanly for paper or PDF export.
 
 ## [v2.1.1] - 2026-03-24
 

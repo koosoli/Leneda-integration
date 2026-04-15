@@ -349,6 +349,27 @@ export class LenedaApp {
     this.setTheme(this.state.theme === "dark" ? "light" : "dark");
   }
 
+  private printInvoice(): void {
+    const previousTitle = document.title;
+    const rangeSuffix = this.state.rangeData?.start && this.state.rangeData?.end
+      ? `${this.state.rangeData.start.slice(0, 10)}_to_${this.state.rangeData.end.slice(0, 10)}`
+      : this.state.range;
+    const nextTitle = `Leneda-invoice-${rangeSuffix}`.replace(/[^a-z0-9_-]+/gi, "-");
+    let restored = false;
+
+    const restoreTitle = (): void => {
+      if (restored) return;
+      restored = true;
+      document.title = previousTitle;
+      window.removeEventListener("afterprint", restoreTitle);
+    };
+
+    document.title = nextTitle;
+    window.addEventListener("afterprint", restoreTitle, { once: true });
+    window.print();
+    window.setTimeout(restoreTitle, 1000);
+  }
+
   private getMainContentScrollTop(): number {
     const main = this.root.querySelector(".main-content") as HTMLElement | null;
     if (main) return main.scrollTop;
@@ -442,6 +463,7 @@ export class LenedaApp {
     // ── Attach event listeners ──
     this.attachNavListeners();
     this.attachDashboardListeners();
+    this.attachInvoiceListeners();
     this.attachSettingsListeners();
   }
 
@@ -524,6 +546,12 @@ export class LenedaApp {
       } else {
         this.changeRange(this.state.range === "custom" ? "yesterday" : this.state.range);
       }
+    });
+  }
+
+  private attachInvoiceListeners(): void {
+    this.root.querySelector("#print-invoice-btn")?.addEventListener("click", () => {
+      this.printInvoice();
     });
   }
 

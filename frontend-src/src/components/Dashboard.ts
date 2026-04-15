@@ -10,7 +10,7 @@
 import type { AppState } from "./App";
 import { fmtNum, fmtDate } from "../utils/format";
 
-const RANGES: { id: string; label: string }[] = [
+export const RANGES: { id: string; label: string }[] = [
   { id: "yesterday", label: "Yesterday" },
   { id: "this_week", label: "This Week" },
   { id: "last_week", label: "Last Week" },
@@ -68,19 +68,99 @@ export function renderDashboard(state: AppState): string {
     1,
   );
 
-  const flowWidth = (value: number, min = 3, max = 11): string =>
-    (value > 0 ? min + (value / maxFlowValue) * (max - min) : 2).toFixed(1);
+  const flowWidth = (value: number, min = 2.8, max = 8.2): number =>
+    value > 0 ? min + (value / maxFlowValue) * (max - min) : 1.8;
 
-  const flowOpacity = (value: number, min = 0.22, max = 0.94): string =>
-    (value > 0 ? min + (value / maxFlowValue) * (max - min) : 0.12).toFixed(2);
+  const flowRailWidth = (value: number): number => flowWidth(value) + 1.4;
 
-  const flowDuration = (value: number, fast = 1.35, slow = 3.2): string =>
+  const flowHaloWidth = (value: number): number => flowWidth(value) + 5.4;
+
+  const flowOpacity = (value: number, min = 0.28, max = 0.88): number =>
+    value > 0 ? min + (value / maxFlowValue) * (max - min) : 0.1;
+
+  const flowHaloOpacity = (value: number, min = 0.09, max = 0.22): number =>
+    value > 0 ? min + (value / maxFlowValue) * (max - min) : 0.05;
+
+  const flowDuration = (value: number, fast = 1.6, slow = 3.9): string =>
     `${(value > 0
       ? Math.max(fast, slow - (value / maxFlowValue) * (slow - fast))
       : slow).toFixed(2)}s`;
 
-  const flowRadius = (value: number, min = 4, max = 7.5): string =>
-    (value > 0 ? min + (value / maxFlowValue) * (max - min) : 3.5).toFixed(1);
+  const flowRadius = (value: number, min = 3.4, max = 5.8): number =>
+    value > 0 ? min + (value / maxFlowValue) * (max - min) : 3;
+
+  const mobileFlowPercent = (value: number): number =>
+    value > 0 ? Math.max(18, Math.round((value / maxFlowValue) * 100)) : 0;
+
+  const renderFlow = (options: {
+    path: string;
+    value: number;
+    gradientId: string;
+    colorVar: string;
+    filterId: string;
+    particleClass: string;
+    direction?: "forward" | "reverse";
+  }): string => {
+    const {
+      path,
+      value,
+      gradientId,
+      colorVar,
+      filterId,
+      particleClass,
+      direction = "forward",
+    } = options;
+    const directionKeyPoints = direction === "reverse" ? "1;0" : "0;1";
+
+    return `
+      <path
+        class="flow-halo ${particleClass}"
+        d="${path}"
+        stroke="url(#${gradientId})"
+        stroke-width="${flowHaloWidth(value).toFixed(1)}"
+        stroke-opacity="${flowHaloOpacity(value).toFixed(2)}"
+        stroke-linecap="round"
+        fill="none"
+      />
+      <path
+        class="flow-rail ${particleClass}"
+        d="${path}"
+        stroke="rgba(255,255,255,0.08)"
+        stroke-width="${flowRailWidth(value).toFixed(1)}"
+        stroke-opacity="0.42"
+        stroke-linecap="round"
+        fill="none"
+      />
+      <path
+        class="flow-stream ${particleClass}"
+        d="${path}"
+        stroke="url(#${gradientId})"
+        stroke-width="${flowWidth(value).toFixed(1)}"
+        stroke-opacity="${flowOpacity(value).toFixed(2)}"
+        stroke-linecap="round"
+        fill="none"
+      />
+      ${value > 0 ? `
+        <circle
+          class="flow-particle ${particleClass}"
+          r="${flowRadius(value).toFixed(1)}"
+          fill="${colorVar}"
+          filter="url(#${filterId})"
+        >
+          <animateMotion dur="${flowDuration(value)}" repeatCount="indefinite" path="${path}" keyPoints="${directionKeyPoints}" keyTimes="0;1" calcMode="linear" />
+        </circle>
+        <circle
+          class="flow-particle flow-particle-secondary ${particleClass}"
+          r="${Math.max(2.4, flowRadius(value) - 1.2).toFixed(1)}"
+          fill="${colorVar}"
+          fill-opacity="0.75"
+          filter="url(#${filterId})"
+        >
+          <animateMotion dur="${flowDuration(value)}" begin="-${(parseFloat(flowDuration(value)) / 2).toFixed(2)}s" repeatCount="indefinite" path="${path}" keyPoints="${directionKeyPoints}" keyTimes="0;1" calcMode="linear" />
+        </circle>
+      ` : ""}
+    `;
+  };
 
   // Chart title — dynamic based on selected range
   const rangeLabel =
@@ -92,7 +172,7 @@ export function renderDashboard(state: AppState): string {
 
   return `
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.1.1</div>
+      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.2.0</div>
 
       <!-- Range Selector -->
       <div class="range-selector">
@@ -350,41 +430,100 @@ export function renderDashboard(state: AppState): string {
                   </g>
                 </g>
 
-                <path d="M 560 98 C 520 102 474 130 434 182" stroke="url(#flow-solar)" stroke-width="${flowWidth(directSolarToHome)}" stroke-opacity="${flowOpacity(directSolarToHome)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-green)" />
-                ${directSolarToHome > 0 ? `
-                  <circle r="${flowRadius(directSolarToHome)}" fill="var(--clr-production)" filter="url(#glow-green)">
-                    <animateMotion dur="${flowDuration(directSolarToHome)}" repeatCount="indefinite" path="M 560 98 C 520 102 474 130 434 182" />
-                  </circle>
-                ` : ""}
+                ${renderFlow({
+                  path: "M 560 98 C 520 102 474 130 434 182",
+                  value: directSolarToHome,
+                  gradientId: "flow-solar",
+                  colorVar: "var(--clr-production)",
+                  filterId: "glow-green",
+                  particleClass: "flow-solar",
+                })}
 
-                <path d="M 146 224 C 226 224 298 224 354 214" stroke="url(#flow-grid-in)" stroke-width="${flowWidth(boughtFromGrid)}" stroke-opacity="${flowOpacity(boughtFromGrid)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-red)" />
-                ${boughtFromGrid > 0 ? `
-                  <circle r="${flowRadius(boughtFromGrid)}" fill="var(--clr-consumption)" filter="url(#glow-red)">
-                    <animateMotion dur="${flowDuration(boughtFromGrid)}" repeatCount="indefinite" path="M 146 224 C 226 224 298 224 354 214" />
-                  </circle>
-                ` : ""}
+                ${renderFlow({
+                  path: "M 146 224 C 226 224 298 224 354 214",
+                  value: boughtFromGrid,
+                  gradientId: "flow-grid-in",
+                  colorVar: "var(--clr-consumption)",
+                  filterId: "glow-red",
+                  particleClass: "flow-grid-in",
+                })}
 
-                <path d="M 446 246 C 386 292 286 314 146 312" stroke="url(#flow-grid-out)" stroke-width="${flowWidth(soldToMarket)}" stroke-opacity="${flowOpacity(soldToMarket)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-blue)" />
-                ${soldToMarket > 0 ? `
-                  <circle r="${flowRadius(soldToMarket)}" fill="var(--clr-export)" filter="url(#glow-blue)">
-                    <animateMotion dur="${flowDuration(soldToMarket)}" repeatCount="indefinite" path="M 446 246 C 386 292 286 314 146 312" />
-                  </circle>
-                ` : ""}
+                ${renderFlow({
+                  path: "M 446 246 C 386 292 286 314 146 312",
+                  value: soldToMarket,
+                  gradientId: "flow-grid-out",
+                  colorVar: "var(--clr-export)",
+                  filterId: "glow-blue",
+                  particleClass: "flow-grid-out",
+                })}
 
-                <path d="M 450 206 C 514 184 582 184 650 206" stroke="url(#flow-shared-out)" stroke-width="${flowWidth(shared)}" stroke-opacity="${flowOpacity(shared)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-blue)" />
-                ${shared > 0 ? `
-                  <circle r="${flowRadius(shared)}" fill="var(--clr-export)" filter="url(#glow-blue)">
-                    <animateMotion dur="${flowDuration(shared)}" repeatCount="indefinite" path="M 450 206 C 514 184 582 184 650 206" />
-                  </circle>
-                ` : ""}
+                ${renderFlow({
+                  path: "M 450 206 C 514 184 582 184 650 206",
+                  value: shared,
+                  gradientId: "flow-shared-out",
+                  colorVar: "var(--clr-export)",
+                  filterId: "glow-blue",
+                  particleClass: "flow-shared-out",
+                })}
 
-                <path d="M 650 236 C 586 252 522 254 448 238" stroke="url(#flow-shared-in)" stroke-width="${flowWidth(sharedWithMe)}" stroke-opacity="${flowOpacity(sharedWithMe)}" stroke-linecap="round" fill="none" marker-end="url(#arrow-cyan)" />
-                ${sharedWithMe > 0 ? `
-                  <circle r="${flowRadius(sharedWithMe)}" fill="var(--clr-primary)" filter="url(#glow-cyan)">
-                    <animateMotion dur="${flowDuration(sharedWithMe)}" repeatCount="indefinite" path="M 650 236 C 586 252 522 254 448 238" />
-                  </circle>
-                ` : ""}
+                ${renderFlow({
+                  path: "M 650 236 C 586 252 522 254 448 238",
+                  value: sharedWithMe,
+                  gradientId: "flow-shared-in",
+                  colorVar: "var(--clr-primary)",
+                  filterId: "glow-cyan",
+                  particleClass: "flow-shared-in",
+                  direction: "reverse",
+                })}
               </svg>
+            </div>
+
+            <div class="mobile-flow-summary">
+              <div class="mobile-flow-house">
+                <span class="mobile-flow-kicker">House</span>
+                <strong class="mobile-flow-house-value">${fmtNum(totalHomeEnergy)} kWh supplied</strong>
+                <span class="mobile-flow-house-meta">
+                  ${fmtNum(selfSufficiency, 0)}% solar supplied${peakPower > 0 ? ` · Peak ${fmtNum(peakPower, 2)} kW` : ""}
+                </span>
+              </div>
+
+              <div class="mobile-flow-list">
+                <div class="mobile-flow-item solar">
+                  <div class="mobile-flow-item-top">
+                    <span class="mobile-flow-item-label">Solar to home</span>
+                    <strong>${fmtNum(solarToHome)} kWh</strong>
+                  </div>
+                  <div class="mobile-flow-bar"><span style="width: ${mobileFlowPercent(solarToHome)}%;"></span></div>
+                  <p>Energy used inside the house${sharedWithMe > 0 ? ", including received community energy" : ""}.</p>
+                </div>
+
+                <div class="mobile-flow-item import">
+                  <div class="mobile-flow-item-top">
+                    <span class="mobile-flow-item-label">Bought from grid</span>
+                    <strong>${fmtNum(boughtFromGrid)} kWh</strong>
+                  </div>
+                  <div class="mobile-flow-bar"><span style="width: ${mobileFlowPercent(boughtFromGrid)}%;"></span></div>
+                  <p>Electricity purchased from the grid for the selected period.</p>
+                </div>
+
+                <div class="mobile-flow-item export">
+                  <div class="mobile-flow-item-top">
+                    <span class="mobile-flow-item-label">Grid export</span>
+                    <strong>${fmtNum(soldToMarket)} kWh</strong>
+                  </div>
+                  <div class="mobile-flow-bar"><span style="width: ${mobileFlowPercent(soldToMarket)}%;"></span></div>
+                  <p>Surplus energy sent back to the market.</p>
+                </div>
+
+                <div class="mobile-flow-item community">
+                  <div class="mobile-flow-item-top">
+                    <span class="mobile-flow-item-label">Community exchange</span>
+                    <strong>${fmtNum(shared + sharedWithMe)} kWh</strong>
+                  </div>
+                  <div class="mobile-flow-bar"><span style="width: ${mobileFlowPercent(shared + sharedWithMe)}%;"></span></div>
+                  <p>Sent ${fmtNum(shared)} kWh · received ${fmtNum(sharedWithMe)} kWh.</p>
+                </div>
+              </div>
             </div>
 
             <div class="flow-legend">

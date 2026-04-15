@@ -9,6 +9,7 @@
  * - Compensation fund, electricity tax, VAT
  */
 import type { AppState } from "./App";
+import { RANGES } from "./Dashboard";
 import type {
   FeedInRate,
   MeterMonthlyFee,
@@ -19,6 +20,43 @@ import type {
 } from "../api/leneda";
 import { fmtDate, fmtNum } from "../utils/format";
 
+const CREOS_REFERENCE_POWER_LEVELS: ReadonlyArray<{
+  kw: number;
+  fixedMonthlyFee: number;
+  existingContractsOnly?: boolean;
+}> = [
+  { kw: 3, fixedMonthlyFee: 7.42 },
+  { kw: 7, fixedMonthlyFee: 12.84 },
+  { kw: 12, fixedMonthlyFee: 19.61 },
+  { kw: 17, fixedMonthlyFee: 26.39 },
+  { kw: 27, fixedMonthlyFee: 39.94 },
+  { kw: 43, fixedMonthlyFee: 61.62 },
+  { kw: 70, fixedMonthlyFee: 98.20 },
+  { kw: 100, fixedMonthlyFee: 138.85 },
+  { kw: 150, fixedMonthlyFee: 206.60, existingContractsOnly: true },
+  { kw: 200, fixedMonthlyFee: 274.35, existingContractsOnly: true },
+];
+
+function parseDateOnly(value?: string): Date | null {
+  if (!value) return null;
+
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function toDateInputValue(value?: string): string {
+  if (!value) return "";
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
 /**
  * Compute the number of days in the viewed period and a proration factor
  * so fixed monthly costs (energy_fixed_fee, network_metering_rate,
@@ -28,67 +66,101 @@ function periodProration(
   range: string,
   customStart?: string,
   customEnd?: string,
-): { days: number; monthDays: number; factor: number } {
+  rangeStart?: string,
+  rangeEnd?: string,
+): { days: number; factor: number; label: string } {
   const now = new Date();
-  const dim = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
+  const parsedStart = parseDateOnly(rangeStart);
+  const parsedEnd = parseDateOnly(rangeEnd);
 
-  let periodDays: number;
-  let refDate: Date;
+  let start = parsedStart;
+  let end = parsedEnd;
 
-  switch (range) {
-    case "yesterday": {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 1);
-      periodDays = 1;
-      refDate = d;
-      break;
-    }
-    case "this_week": {
-      const d = new Date(now);
-      const day = d.getDay() || 7;
-      const monday = new Date(d);
-      monday.setDate(d.getDate() - day + 1);
-      periodDays = Math.max(1, Math.round((now.getTime() - monday.getTime()) / 86_400_000) + 1);
-      refDate = monday;
-      break;
-    }
-    case "last_week": {
-      periodDays = 7;
-      const d = new Date(now);
-      d.setDate(d.getDate() - 7);
-      refDate = d;
-      break;
-    }
-    case "this_month": {
-      periodDays = now.getDate();
-      refDate = now;
-      break;
-    }
-    case "last_month": {
-      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      periodDays = dim(lm.getFullYear(), lm.getMonth());
-      refDate = lm;
-      break;
-    }
-    case "custom": {
-      if (customStart && customEnd) {
-        const s = new Date(customStart);
-        const e = new Date(customEnd);
-        periodDays = Math.max(1, Math.round((e.getTime() - s.getTime()) / 86_400_000) + 1);
-        refDate = s;
-      } else {
-        periodDays = 1;
-        refDate = now;
+  if (!start || !end) {
+    switch (range) {
+      case "yesterday": {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 1);
+        start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        end = new Date(start);
+        break;
       }
-      break;
+      case "this_week": {
+        const d = new Date(now);
+        const day = d.getDay() || 7;
+        start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day + 1);
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      }
+      case "last_week": {
+        const d = new Date(now);
+        const day = d.getDay() || 7;
+        const mondayThisWeek = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day + 1);
+        start = new Date(mondayThisWeek.getFullYear(), mondayThisWeek.getMonth(), mondayThisWeek.getDate() - 7);
+        end = new Date(mondayThisWeek.getFullYear(), mondayThisWeek.getMonth(), mondayThisWeek.getDate() - 1);
+        break;
+      }
+      case "this_month": {
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      }
+      case "last_month": {
+        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        end = new Date(now.getFullYear(), now.getMonth(), 0);
+        break;
+      }
+      case "this_year": {
+        start = new Date(now.getFullYear(), 0, 1);
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      }
+      case "last_year": {
+        start = new Date(now.getFullYear() - 1, 0, 1);
+        end = new Date(now.getFullYear() - 1, 11, 31);
+        break;
+      }
+      case "custom": {
+        start = parseDateOnly(customStart) ?? new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        end = parseDateOnly(customEnd) ?? new Date(start);
+        break;
+      }
+      default: {
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        end = new Date(start);
+        break;
+      }
     }
-    default:
-      periodDays = 1;
-      refDate = now;
   }
 
-  const monthDays = dim(refDate.getFullYear(), refDate.getMonth());
-  return { days: periodDays, monthDays, factor: periodDays / monthDays };
+  if (end < start) {
+    const swap = start;
+    start = end;
+    end = swap;
+  }
+
+  let days = 0;
+  let factor = 0;
+  const cursor = new Date(start);
+
+  while (cursor <= end) {
+    const monthDays = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    factor += 1 / monthDays;
+    days += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const fullMonth =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === 1 &&
+    end.getDate() === new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate();
+
+  return {
+    days,
+    factor,
+    label: fullMonth ? "full month" : `${days} day${days === 1 ? "" : "s"}`,
+  };
 }
 
 function matchesDayGroup(day: number, dayGroup: DayGroup): boolean {
@@ -247,18 +319,17 @@ export function renderInvoice(state: AppState): string {
   const usesReferenceWindows = referenceWindows.length > 0 && !!windowedUsage;
   const effectivePeakPower = usesReferenceWindows ? windowedUsage!.peakPowerKw : peakPower;
   const effectiveExceedanceKwh = usesReferenceWindows ? windowedUsage!.exceedanceKwh : exceedanceKwh;
+  const periodStartValue = toDateInputValue(d.start ?? state.customStart);
+  const periodEndValue = toDateInputValue(d.end ?? state.customEnd);
 
   // ── Period proration ──
   // Fixed monthly fees are scaled to the viewed period length.
-  const { days: periodDays, monthDays, factor: proFactor } = periodProration(
-    state.range, state.customStart, state.customEnd,
+  const { days: periodDays, factor: proFactor, label: proLabel } = periodProration(
+    state.range, state.customStart, state.customEnd, d.start, d.end,
   );
   const proratedFixedFee = config.energy_fixed_fee * proFactor;
   const proratedMetering = config.network_metering_rate * proFactor;
   const proratedPowerRef = config.network_power_ref_rate * proFactor;
-  const proLabel = periodDays < monthDays
-    ? `${periodDays}/${monthDays} days`
-    : "full month";
 
   // ── Cost calculation (Luxembourg model) ──
 
@@ -353,6 +424,46 @@ export function renderInvoice(state: AppState): string {
 
   const currency = config.currency || "EUR";
   const fmt = (v: number) => `${fmtNum(v, 2)} ${currency}`;
+  const currentReferenceLevel = CREOS_REFERENCE_POWER_LEVELS.find(
+    (level) => Math.abs(level.kw - refPower) < 0.05,
+  );
+  const baseSubtotalWithoutReferencePower = subtotalCosts - proratedPowerRef - exceedanceCost;
+  const referencePowerComparison = windowedUsage
+    ? CREOS_REFERENCE_POWER_LEVELS.map((level) => {
+      const simulatedUsage = calculateWindowedUsage(
+        state.consumptionTimeseries!.items,
+        config.energy_variable_rate,
+        level.kw,
+        rateWindows,
+        referenceWindows,
+        state.productionTimeseries?.items ?? [],
+      );
+      const fixedCharge = level.fixedMonthlyFee * proFactor;
+      const comparisonExceedanceCharge = simulatedUsage.exceedanceKwh * config.exceedance_rate;
+      const simulatedSubtotal = baseSubtotalWithoutReferencePower + fixedCharge + comparisonExceedanceCharge;
+      const total = simulatedSubtotal * (1 + config.vat_rate);
+
+      return {
+        ...level,
+        fixedCharge,
+        exceedanceKwh: simulatedUsage.exceedanceKwh,
+        exceedanceCharge: comparisonExceedanceCharge,
+        total,
+        deltaVsCurrent: total - totalCosts,
+      };
+    })
+    : [];
+  const optimalReferenceLevel = referencePowerComparison.reduce<typeof referencePowerComparison[number] | null>(
+    (best, level) => {
+      if (!best || level.total < best.total) return level;
+      return best;
+    },
+    null,
+  );
+  const formatDeltaVsCurrent = (value: number): string => {
+    if (Math.abs(value) < 0.005) return "Current total";
+    return `${value > 0 ? "+" : "-"}${fmt(Math.abs(value))}`;
+  };
   const rangeLabel = d.start && d.end
     ? `${fmtDate(d.start)} — ${fmtDate(d.end)}`
     : state.range.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -361,9 +472,9 @@ export function renderInvoice(state: AppState): string {
   const exceedanceWarning = effectiveExceedanceKwh > 0
     ? `<div class="card exceedance-warning">
         <strong>⚠️ Reference Power Exceeded</strong>
-        <p>Peak: <strong>${fmtNum(effectivePeakPower, 1)} kW</strong> &mdash; ${usesReferenceWindows ? "Scheduled reference windows active" : `Reference: ${fmtNum(refPower, 1)} kW`}</p>
-        <p>Total exceedance energy: <strong>${fmtNum(effectiveExceedanceKwh, 2)} kWh</strong></p>
-        <p class="muted">Surcharge: ${fmt(exceedanceCost)}</p>
+        <p>Peak load: <strong>${fmtNum(effectivePeakPower, 1)} kW</strong> &mdash; ${usesReferenceWindows ? "Reference power windows active" : `Reference power level: ${fmtNum(refPower, 1)} kW`}</p>
+        <p>Exceedance volume: <strong>${fmtNum(effectiveExceedanceKwh, 2)} kWh</strong></p>
+        <p class="muted">Exceedance charge: ${fmt(exceedanceCost)}</p>
       </div>`
     : "";
 
@@ -377,25 +488,158 @@ export function renderInvoice(state: AppState): string {
           `).join("")
     : `
             <tr>
-              <td>Variable (${fmtNum(billedConsumption)} kWh bought from grid)</td>
+              <td>Supplier rate (${fmtNum(billedConsumption)} kWh bought from grid)</td>
               <td style="text-align: right;">${fmtNum(config.energy_variable_rate, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(energyCost)}</td>
             </tr>
           `;
 
   const referenceModeNote = usesReferenceWindows
-    ? `Scheduled windows active (${referenceWindows.length})`
+    ? `Reference power windows active (${referenceWindows.length})`
     : `${fmtNum(refPower, 1)} kW`;
 
   const tariffModeNote = usesTariffWindows
     ? `Time-of-use windows active (${rateWindows.length})`
     : `${fmtNum(config.energy_variable_rate, 4)} ${currency}/kWh`;
+  const referencePowerComparisonRows = referencePowerComparison.map((level) => {
+    const isOptimal = !!optimalReferenceLevel && level.kw === optimalReferenceLevel.kw;
+    const isCurrent = !!currentReferenceLevel && level.kw === currentReferenceLevel.kw;
+    const deltaClass =
+      level.deltaVsCurrent < -0.005
+        ? "comparison-delta-savings"
+        : level.deltaVsCurrent > 0.005
+          ? "comparison-delta-extra"
+          : "";
+
+    return `
+            <tr class="${isOptimal ? "reference-power-best-row" : ""}${isCurrent ? " reference-power-current-row" : ""}">
+              <td>
+                <div class="reference-level-cell">
+                  <span class="reference-level-kw">${fmtNum(level.kw, 0)} kW</span>
+                  ${isOptimal ? '<span class="reference-level-badge best">Financially optimal</span>' : ""}
+                  ${isCurrent ? '<span class="reference-level-badge current">Current</span>' : ""}
+                  ${level.existingContractsOnly ? '<span class="reference-level-badge legacy">Existing contracts</span>' : ""}
+                </div>
+              </td>
+              <td style="text-align: right;">${fmt(level.fixedCharge)}</td>
+              <td style="text-align: right;">${fmt(level.exceedanceCharge)}</td>
+              <td style="text-align: right;"><strong>${fmt(level.total)}</strong></td>
+              <td class="${deltaClass}" style="text-align: right;">${formatDeltaVsCurrent(level.deltaVsCurrent)}</td>
+            </tr>
+          `;
+  }).join("");
+  const referencePowerComparisonCard = referencePowerComparison.length > 0
+    ? `
+      <div class="card reference-power-card">
+        <div class="reference-power-card-header">
+          <div>
+            <h3 class="card-title"><span class="title-icon">📏</span> Reference Power Level Comparison</h3>
+            <p class="muted reference-power-card-copy">
+              Creos determines the financially optimal reference power level from the 15-minute load curve.
+              This comparison recomputes the fixed charge and exceedance charge for each standard reference power level
+              while keeping the other invoice items unchanged.
+              ${usesReferenceWindows
+                ? "Configured reference power windows stay active in this comparison."
+                : "One reference power level is applied to the full selected period."}
+              ${!currentReferenceLevel
+                ? `Your current configuration uses ${fmtNum(refPower, 1)} kW, which is outside the standard Creos low-voltage reference power levels.`
+                : ""}
+            </p>
+          </div>
+          ${optimalReferenceLevel
+            ? `<div class="reference-power-optimum">
+                <span class="reference-level-badge best">Financially optimal: ${fmtNum(optimalReferenceLevel.kw, 0)} kW</span>
+              </div>`
+            : ""}
+        </div>
+        <table class="invoice-table reference-power-table">
+          <thead>
+            <tr>
+              <th>Reference power level</th>
+              <th style="text-align: right;">Fixed charge</th>
+              <th style="text-align: right;">Exceedance charge</th>
+              <th style="text-align: right;">Estimated total</th>
+              <th style="text-align: right;">Difference vs current</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${referencePowerComparisonRows}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `
+      <div class="card reference-power-card">
+        <p class="muted">Reference power level comparison requires 15-minute load-curve data for the selected period.</p>
+      </div>
+    `;
+  const rangeSelectorMarkup = `
+      <div class="range-selector">
+        ${RANGES.map((range) => `
+          <button
+            class="range-btn ${range.id === state.range ? "active" : ""}"
+            data-range="${range.id}"
+          >${range.label}</button>
+        `).join("")}
+      </div>
+    `;
+  const rangeInfoMarkup = d.start && d.end
+    ? (() => {
+      const start = new Date(d.start);
+      const end = new Date(d.end);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
+      return `
+        <div class="range-info-bar">
+          Period: ${start.toLocaleDateString()} - ${end.toLocaleDateString()}
+        </div>
+      `;
+    })()
+    : "";
+  const rangePickerMarkup = state.range === "custom"
+    ? `
+      <div class="custom-range-picker">
+        <label>
+          <span>From</span>
+          <input type="date" id="custom-start" value="${state.customStart ?? ""}" />
+        </label>
+        <label>
+          <span>To</span>
+          <input type="date" id="custom-end" value="${state.customEnd ?? ""}" />
+        </label>
+        <button class="btn btn-primary" id="apply-custom-range">Apply</button>
+      </div>
+    `
+    : (periodStartValue && periodEndValue)
+      ? `
+        <div class="custom-range-picker period-preview">
+          <span class="period-preview-label">Viewed period</span>
+          <label>
+            <span>From</span>
+            <input type="date" value="${periodStartValue}" readonly aria-label="Preset period start" />
+          </label>
+          <label>
+            <span>To</span>
+            <input type="date" value="${periodEndValue}" readonly aria-label="Preset period end" />
+          </label>
+        </div>
+      `
+      : "";
 
   return `
     <section class="invoice-view">
-      <div class="section-header">
-        <h2>Cost Estimate &mdash; ${rangeLabel}</h2>
-        <div style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-top: var(--sp-2);">
+      ${rangeSelectorMarkup}
+      ${rangeInfoMarkup}
+      ${rangePickerMarkup}
+
+      <div class="section-header invoice-section-header">
+        <div class="invoice-header-top">
+          <div>
+            <h2>Invoice Estimate &mdash; ${rangeLabel}</h2>
+            <p class="muted invoice-print-note">Print-friendly view for the currently selected period.</p>
+          </div>
+          <button class="btn btn-outline invoice-print-btn" id="print-invoice-btn" type="button">Print Invoice</button>
+        </div>
+        <div class="invoice-summary-badges">
           <span class="badge" style="background: var(--clr-consumption-muted); color: var(--clr-consumption);">⚡ ${fmtNum(consumption)} kWh home usage</span>
           <span class="badge" style="background: var(--clr-consumption-muted); color: var(--clr-consumption);">🔌 ${fmtNum(billedConsumption)} kWh bought from grid</span>
           <span class="badge" style="background: var(--clr-production-muted); color: var(--clr-production);">☀️ ${fmtNum(production)} kWh produced</span>
@@ -431,17 +675,17 @@ export function renderInvoice(state: AppState): string {
               <td style="text-align: right;">${fmt(proratedMetering)}</td>
             </tr>
             <tr>
-              <td>Power Reference (${referenceModeNote}) <span class="muted">(${proLabel})</span></td>
+              <td>Reference power level (${referenceModeNote}) <span class="muted">(${proLabel})</span></td>
               <td style="text-align: right;">${fmtNum(config.network_power_ref_rate, 2)} ${currency}/mo</td>
               <td style="text-align: right;">${fmt(proratedPowerRef)}</td>
             </tr>
             <tr>
-              <td>Variable (${fmtNum(billedConsumption)} kWh bought from grid)</td>
+              <td>Volumetric charge (${fmtNum(billedConsumption)} kWh bought from grid)</td>
               <td style="text-align: right;">${fmtNum(config.network_variable_rate, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(networkVariableCost)}</td>
             </tr>
             <tr class="${effectiveExceedanceKwh > 0 ? "exceedance-row" : ""}">
-              <td>Exceedance (${fmtNum(effectiveExceedanceKwh, 2)} kWh over ref)</td>
+              <td>Exceedance charge (${fmtNum(effectiveExceedanceKwh, 2)} kWh above the reference power level)</td>
               <td style="text-align: right;">${fmtNum(config.exceedance_rate, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(exceedanceCost)}</td>
             </tr>
@@ -516,14 +760,16 @@ export function renderInvoice(state: AppState): string {
         </table>
       </div>
 
+      ${referencePowerComparisonCard}
+
       <div class="card invoice-footer">
         <p class="muted" style="line-height: var(--lh-relaxed);">
-          This is an estimate based on your configured billing rates.
+          This estimate uses your configured billing rates for the selected period.
           Variable electricity charges are applied to energy bought from the grid (${fmtNum(billedConsumption)} kWh), not total home usage.
-          Fixed monthly fees are prorated to the viewed period (${periodDays} of ${monthDays} days = ${fmtNum(proFactor * 100, 1)}%).
-          Supplier energy pricing: ${tariffModeNote}.
-          Peak power (${fmtNum(effectivePeakPower, 1)} kW) is compared against ${usesReferenceWindows ? "your scheduled reference windows" : `your reference power (${fmtNum(refPower, 1)} kW)`} &mdash; 
-          every kWh consumed above the Referenzwert incurs a surcharge of ${fmtNum(config.exceedance_rate, 4)} ${currency}/kWh.
+          Supplier pricing: ${tariffModeNote}.
+          Fixed monthly charges are prorated across the viewed period (${periodDays} days, ${proLabel}, equivalent to ${fmtNum(proFactor, 2)} monthly charges).
+          Peak load (${fmtNum(effectivePeakPower, 1)} kW) is compared against ${usesReferenceWindows ? "your configured reference power windows" : `your reference power level (${fmtNum(refPower, 1)} kW)`} &mdash;
+          every kWh above the reference power level is billed with an exceedance charge of ${fmtNum(config.exceedance_rate, 4)} ${currency}/kWh.
           Adjust rates in Settings.
         </p>
       </div>

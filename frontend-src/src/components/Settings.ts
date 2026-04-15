@@ -53,7 +53,7 @@ const FIELD_GROUPS: FieldGroup[] = [
     icon: "🔌",
     fields: [
       { key: "network_metering_rate", label: "Metering Fee", step: "0.01", unit: "EUR/mo", type: "number" },
-      { key: "network_power_ref_rate", label: "Power Reference Fee", step: "0.01", unit: "EUR/mo", type: "number" },
+      { key: "network_power_ref_rate", label: "Reference Power Fixed Charge", step: "0.01", unit: "EUR/mo", type: "number" },
       { key: "network_variable_rate", label: "Variable Rate", step: "0.0001", unit: "EUR/kWh", type: "number" },
     ],
   },
