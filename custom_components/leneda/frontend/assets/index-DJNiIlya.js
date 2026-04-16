@@ -47,7 +47,7 @@ var dt=Object.defineProperty;var ut=(t,e,s)=>e in t?dt(t,e,{enumerable:!0,config
       `:""}
     `},re=e!=null&&e.start&&(e!=null&&e.end)?`${B(e.start)} — ${B(e.end)}`:t.range==="custom"&&t.customStart&&t.customEnd?`${B(t.customStart+"T00:00:00")} — ${B(t.customEnd+"T00:00:00")}`:((H=_e.find(S=>S.id===t.range))==null?void 0:H.label)??"Yesterday";return`
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.2.0</div>
+    <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.3.0</div>
 
       <!-- Range Selector -->
       <div class="range-selector">

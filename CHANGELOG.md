@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.3.0] - 2026-04-16
+
+### Bug Fixes
+- **Last Month Exceedance:** Fixed the Home Assistant backend so the `Last Month` preset now computes and returns the cached reference-power exceedance correctly instead of silently omitting the surcharge from invoice estimates.
+- **Preset/Custom Invoice Parity:** Custom date ranges that exactly match a preset period now reuse the same preset billing data path, so a manual `2026-03-01` to `2026-03-31` selection matches `Last Month` for billed grid import, exceedance, and invoice totals.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, and dashboard version badge to `v2.3.0`.
+
 ## [v2.2.0] - 2026-04-15
 
 ### New Features

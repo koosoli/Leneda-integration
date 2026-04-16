@@ -96,6 +96,52 @@ PRESET_REMAINING_CONSUMPTION_KEYS: dict[str, str | None] = {
 }
 
 
+def _preset_range_bounds(range_type: str, now: datetime) -> tuple[datetime, datetime] | None:
+    """Return local start/end datetimes for a preset range."""
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if range_type == "yesterday":
+        return today_start - timedelta(days=1), today_start - timedelta(seconds=1)
+    if range_type == "this_week":
+        return today_start - timedelta(days=now.weekday()), now
+    if range_type == "last_week":
+        mon_this_week = today_start - timedelta(days=now.weekday())
+        return mon_this_week - timedelta(days=7), mon_this_week - timedelta(seconds=1)
+    if range_type == "this_month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), now
+    if range_type == "last_month":
+        first_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = first_this_month - timedelta(seconds=1)
+        return end.replace(day=1, hour=0, minute=0, second=0, microsecond=0), end
+    if range_type == "this_year":
+        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0), now
+    if range_type == "last_year":
+        try:
+            start = now.replace(year=now.year - 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(year=now.year - 1, month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
+        except ValueError:
+            start = (now - timedelta(days=366)).replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = start.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
+        return start, end
+    return None
+
+
+def _match_exact_preset_range(start_dt: datetime, end_dt: datetime, now: datetime) -> str | None:
+    """Return the preset id when a custom request covers exactly that preset's dates."""
+    start_date = start_dt.date()
+    end_date = end_dt.date()
+
+    for range_type in PRESET_RANGE_MAPPING:
+        bounds = _preset_range_bounds(range_type, now)
+        if not bounds:
+            continue
+        preset_start, preset_end = bounds
+        if start_date == preset_start.date() and end_date == preset_end.date():
+            return range_type
+
+    return None
+
+
 class LenedaModeView(HomeAssistantView):
     """Return deployment mode so the frontend knows to hide credential UI."""
 
@@ -467,39 +513,12 @@ class LenedaDataView(HomeAssistantView):
 
         cd = coordinator.data
 
-        # Determine bounds using Home Assistant's time utilities
+        # Determine bounds using Home Assistant's local time utilities
         from homeassistant.util import dt as dt_util
         now = dt_util.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        s, e = None, None
-        if range_type == "yesterday":
-            s = today_start - timedelta(days=1)
-            e = today_start - timedelta(seconds=1)
-        elif range_type == "this_week":
-            s = today_start - timedelta(days=now.weekday())
-            e = now
-        elif range_type == "last_week":
-            mon_this_week = today_start - timedelta(days=now.weekday())
-            s = mon_this_week - timedelta(days=7)
-            e = mon_this_week - timedelta(seconds=1)
-        elif range_type == "this_month":
-            s = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            e = now
-        elif range_type == "last_month":
-            first_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            e = first_this_month - timedelta(seconds=1)
-            s = e.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif range_type == "this_year":
-            s = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-            e = now
-        elif range_type == "last_year":
-            try:
-                s = now.replace(year=now.year-1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-                e = now.replace(year=now.year-1, month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
-            except ValueError: # Leap year edge case
-                s = (now - timedelta(days=366)).replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-                e = s.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
+
+        bounds = _preset_range_bounds(range_type, now)
+        s, e = bounds if bounds else (None, None)
 
         # Initialize response
         response = {
@@ -556,6 +575,20 @@ class LenedaCustomDataView(HomeAssistantView):
             return self.json({"error": "no_data"}, status_code=503)
 
         try:
+            from homeassistant.util import dt as dt_util
+
+            matched_range = _match_exact_preset_range(start_dt, end_dt, dt_util.now())
+            if matched_range:
+                preset_coordinator = _get_first_coordinator(hass) or coordinator
+                cached_data = _build_cached_preset_data(preset_coordinator.data or {}, matched_range)
+                if cached_data:
+                    return self.json({
+                        "start": start_str,
+                        "end": end_str,
+                        "metering_point": preset_coordinator.metering_point_id,
+                        **cached_data,
+                    })
+
             live_data = await _fetch_live_aggregated_data(hass, start_dt, end_dt)
             response = {
                 "start": start_str,

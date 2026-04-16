@@ -626,16 +626,16 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                             elif isinstance(current_month_cons, Exception):
                                 _LOGGER.error("Error fetching current month power over reference data: %s", current_month_cons)
 
-                                # Last month's calculation (solar-adjusted)
-                                last_month_cons = power_over_ref_results[1]
-                                last_month_prod = power_over_ref_results[3] if len(power_over_ref_results) > 3 else None
-                                prod_items_last = last_month_prod.get("items") if isinstance(last_month_prod, dict) else None
-                                if isinstance(last_month_cons, dict) and last_month_cons.get("items"):
-                                    overage = self._calculate_power_overage(last_month_cons["items"], ref_power_kw, prod_items_last)
-                                    data["last_month_power_usage_over_reference"] = overage
-                                    _LOGGER.debug(f"Calculated {overage:.4f} kWh over reference for last month (solar-adjusted).")
-                                elif isinstance(last_month_cons, Exception):
-                                    _LOGGER.error("Error fetching last month power over reference data: %s", last_month_cons)
+                            # Last month's calculation (solar-adjusted)
+                            last_month_cons = power_over_ref_results[1]
+                            last_month_prod = power_over_ref_results[3] if len(power_over_ref_results) > 3 else None
+                            prod_items_last = last_month_prod.get("items") if isinstance(last_month_prod, dict) else None
+                            if isinstance(last_month_cons, dict) and last_month_cons.get("items"):
+                                overage = self._calculate_power_overage(last_month_cons["items"], ref_power_kw, prod_items_last)
+                                data["last_month_power_usage_over_reference"] = overage
+                                _LOGGER.debug(f"Calculated {overage:.4f} kWh over reference for last month (solar-adjusted).")
+                            elif isinstance(last_month_cons, Exception):
+                                _LOGGER.error("Error fetching last month power over reference data: %s", last_month_cons)
                     except (ValueError, TypeError) as e:
                         _LOGGER.error(f"Could not calculate power usage over reference: {e}")
 
