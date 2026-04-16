@@ -17,6 +17,7 @@ import logging
 import json
 import os
 import aiohttp
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import (
@@ -147,6 +148,78 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
             except (ValueError, TypeError):
                 continue  # Skip if value is not a valid number
         return round(total_overage_kwh, 4)
+
+    def _merge_timeseries_items(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Merge multiple Leneda timeseries payloads by timestamp."""
+        merged: dict[str, dict[str, Any]] = {}
+
+        for payload in payloads:
+            for item in payload.get("items", []):
+                started_at = item.get("startedAt")
+                if not started_at:
+                    continue
+
+                try:
+                    value = float(item.get("value", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+
+                if started_at in merged:
+                    merged[started_at]["value"] += value
+                    continue
+
+                merged[started_at] = {
+                    "startedAt": started_at,
+                    "value": value,
+                    "type": item.get("type", "measured"),
+                    "version": item.get("version", 1),
+                    "calculated": item.get("calculated", False),
+                }
+
+        return [merged[key] for key in sorted(merged.keys())]
+
+    async def _production_items_for_period(
+        self,
+        start_dt,
+        end_dt,
+        primary_result: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return merged production items for all configured production meters."""
+        payloads: list[dict[str, Any]] = []
+
+        if isinstance(primary_result, dict):
+            payloads.append(primary_result)
+        elif self.production_meter:
+            try:
+                payloads.append(
+                    await self.api_client.async_get_metering_data(
+                        self.production_meter, "1-1:2.29.0", start_dt, end_dt
+                    )
+                )
+            except Exception as err:
+                _LOGGER.error("Error fetching production data for %s to %s: %s", start_dt, end_dt, err)
+
+        if len(self.production_meters) > 1:
+            extra_results = await asyncio.gather(*[
+                self.api_client.async_get_metering_data(
+                    meter_id, "1-1:2.29.0", start_dt, end_dt
+                )
+                for meter_id in self.production_meters[1:]
+            ], return_exceptions=True)
+
+            for meter_id, result in zip(self.production_meters[1:], extra_results):
+                if isinstance(result, dict):
+                    payloads.append(result)
+                elif isinstance(result, Exception):
+                    _LOGGER.error(
+                        "Error fetching production data for meter %s between %s and %s: %s",
+                        meter_id,
+                        start_dt,
+                        end_dt,
+                        result,
+                    )
+
+        return self._merge_timeseries_items(payloads)
 
     async def _async_update_data(self) -> dict[str, float | None]:
         """Fetch data from the Leneda API concurrently."""
@@ -606,7 +679,11 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         # Yesterday's calculation — also fetch yesterday's production for solar offset
                         consumption_result = next((res for obis, res in zip(OBIS_CODES.keys(), obis_results) if obis == CONSUMPTION_CODE), None)
                         production_result = next((res for obis, res in zip(OBIS_CODES.keys(), obis_results) if obis == PRODUCTION_CODE), None)
-                        prod_items_yesterday = production_result.get("items") if isinstance(production_result, dict) else None
+                        prod_items_yesterday = await self._production_items_for_period(
+                            yesterday_start_dt,
+                            yesterday_end_dt,
+                            production_result if isinstance(production_result, dict) else None,
+                        )
                         if isinstance(consumption_result, dict) and consumption_result.get("items"):
                             overage = self._calculate_power_overage(consumption_result["items"], ref_power_kw, prod_items_yesterday)
                             data["yesterdays_power_usage_over_reference"] = overage
@@ -618,7 +695,11 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                             # Current month's calculation (solar-adjusted)
                             current_month_cons = power_over_ref_results[0]
                             current_month_prod = power_over_ref_results[2] if len(power_over_ref_results) > 2 else None
-                            prod_items_cur = current_month_prod.get("items") if isinstance(current_month_prod, dict) else None
+                            prod_items_cur = await self._production_items_for_period(
+                                month_start_dt,
+                                effective_month_end,
+                                current_month_prod if isinstance(current_month_prod, dict) else None,
+                            )
                             if isinstance(current_month_cons, dict) and current_month_cons.get("items"):
                                 overage = self._calculate_power_overage(current_month_cons["items"], ref_power_kw, prod_items_cur)
                                 data["current_month_power_usage_over_reference"] = overage
@@ -629,7 +710,11 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                             # Last month's calculation (solar-adjusted)
                             last_month_cons = power_over_ref_results[1]
                             last_month_prod = power_over_ref_results[3] if len(power_over_ref_results) > 3 else None
-                            prod_items_last = last_month_prod.get("items") if isinstance(last_month_prod, dict) else None
+                            prod_items_last = await self._production_items_for_period(
+                                start_of_last_month,
+                                end_of_last_month,
+                                last_month_prod if isinstance(last_month_prod, dict) else None,
+                            )
                             if isinstance(last_month_cons, dict) and last_month_cons.get("items"):
                                 overage = self._calculate_power_overage(last_month_cons["items"], ref_power_kw, prod_items_last)
                                 data["last_month_power_usage_over_reference"] = overage

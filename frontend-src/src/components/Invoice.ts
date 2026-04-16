@@ -317,8 +317,8 @@ export function renderInvoice(state: AppState): string {
     !!windowedUsage &&
     Math.abs(billedConsumption - consumption) < 0.01;
   const usesReferenceWindows = referenceWindows.length > 0 && !!windowedUsage;
-  const effectivePeakPower = usesReferenceWindows ? windowedUsage!.peakPowerKw : peakPower;
-  const effectiveExceedanceKwh = usesReferenceWindows ? windowedUsage!.exceedanceKwh : exceedanceKwh;
+  const effectivePeakPower = windowedUsage ? windowedUsage.peakPowerKw : peakPower;
+  const effectiveExceedanceKwh = windowedUsage ? windowedUsage.exceedanceKwh : exceedanceKwh;
   const periodStartValue = toDateInputValue(d.start ?? state.customStart);
   const periodEndValue = toDateInputValue(d.end ?? state.customEnd);
 

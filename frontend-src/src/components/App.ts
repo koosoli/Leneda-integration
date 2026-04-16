@@ -82,6 +82,95 @@ export interface AppState {
   theme: ThemeMode;
 }
 
+function parseDateInputValue(value: string): Date | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+}
+
+function sameLocalDate(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function getPresetRangeBounds(range: Exclude<TimeRange, "custom">, now = new Date()): { start: Date; end: Date } {
+  switch (range) {
+    case "yesterday": {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 1);
+      d.setHours(0, 0, 0, 0);
+      const end = new Date(d);
+      end.setHours(23, 59, 59, 999);
+      return { start: d, end };
+    }
+    case "this_week": {
+      const d = new Date(now);
+      const day = d.getDay() || 7;
+      d.setDate(d.getDate() - day + 1);
+      d.setHours(0, 0, 0, 0);
+      return { start: d, end: now };
+    }
+    case "last_week": {
+      const d = new Date(now);
+      const day = d.getDay() || 7;
+      const end = new Date(d);
+      end.setDate(d.getDate() - day);
+      end.setHours(23, 59, 59, 999);
+      const start = new Date(end);
+      start.setDate(end.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+      return { start, end };
+    }
+    case "this_month": {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start, end: now };
+    }
+    case "last_month": {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      return { start, end };
+    }
+    case "this_year": {
+      const start = new Date(now.getFullYear(), 0, 1);
+      return { start, end: now };
+    }
+    case "last_year": {
+      const start = new Date(now.getFullYear() - 1, 0, 1);
+      const end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+      return { start, end };
+    }
+  }
+}
+
+function matchPresetRange(startValue: string, endValue: string, now = new Date()): Exclude<TimeRange, "custom"> | null {
+  const start = parseDateInputValue(startValue);
+  const end = parseDateInputValue(endValue);
+  if (!start || !end) return null;
+
+  const presetRanges: Array<Exclude<TimeRange, "custom">> = [
+    "yesterday",
+    "this_week",
+    "last_week",
+    "this_month",
+    "last_month",
+    "this_year",
+    "last_year",
+  ];
+
+  for (const range of presetRanges) {
+    const bounds = getPresetRangeBounds(range, now);
+    if (sameLocalDate(start, bounds.start) && sameLocalDate(end, bounds.end)) {
+      return range;
+    }
+  }
+
+  return null;
+}
+
 export class LenedaApp {
   private root: HTMLElement;
   private state: AppState = {
@@ -260,9 +349,12 @@ export class LenedaApp {
     this.render();
 
     try {
-      const { fetchCustomData } = await import("../api/leneda");
+      const matchedPreset = matchPresetRange(customStart, customEnd);
+      const dataPromise = matchedPreset
+        ? fetchRangeData(matchedPreset)
+        : import("../api/leneda").then(({ fetchCustomData }) => fetchCustomData(customStart, customEnd));
       const [data, consumptionTimeseries, productionTimeseries] = await Promise.all([
-        fetchCustomData(customStart, customEnd),
+        dataPromise,
         fetchTimeseries(
           "1-1:1.29.0",
           new Date(customStart + "T00:00:00").toISOString(),
@@ -290,8 +382,8 @@ export class LenedaApp {
         peak_power_kw: data.peak_power_kw ?? 0,
         exceedance_kwh: data.exceedance_kwh ?? 0,
         metering_point: data.metering_point ?? "",
-        start: data.start,
-        end: data.end,
+        start: data.start ?? customStart,
+        end: data.end ?? customEnd,
       };
       this.state.consumptionTimeseries = consumptionTimeseries;
       this.state.productionTimeseries = productionTimeseries;
