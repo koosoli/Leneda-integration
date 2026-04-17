@@ -169,10 +169,13 @@ export function renderDashboard(state: AppState): string {
       : state.range === "custom" && state.customStart && state.customEnd
       ? `${fmtDate(state.customStart + "T00:00:00")} — ${fmtDate(state.customEnd + "T00:00:00")}`
       : RANGES.find((r) => r.id === state.range)?.label ?? "Yesterday";
+  const chartHint = state.chartConsumptionView === "house"
+    ? "Total Usage shows the full house load, with the solar-covered share highlighted in green and exports below zero · Scroll to zoom · Drag to pan"
+    : "Net Grid focuses on what still came from the grid after solar, with exports shown below zero · The reference limit in kW mode applies here · Scroll to zoom · Drag to pan";
 
   return `
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.4.0</div>
+      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.5.0</div>
 
       <!-- Range Selector -->
       <div class="range-selector">
@@ -626,6 +629,16 @@ export function renderDashboard(state: AppState): string {
               title="Show energy consumed (kWh)"
             >kWh</button>
             <button
+              class="unit-btn ${state.chartConsumptionView === "house" ? "active" : ""}"
+              data-chart-view="house"
+              title="Show the full house consumption with the solar-covered share overlaid"
+            >Total Usage</button>
+            <button
+              class="unit-btn ${state.chartConsumptionView === "grid" ? "active" : ""}"
+              data-chart-view="grid"
+              title="Show the net draw from the grid after solar"
+            >Net Grid</button>
+            <button
               class="reset-zoom-btn"
               style="display: none;"
               title="Reset zoom to full period"
@@ -636,7 +649,7 @@ export function renderDashboard(state: AppState): string {
           <canvas id="energy-chart"></canvas>
         </div>
         <p class="muted chart-hint" style="text-align:center; margin-top: var(--sp-2); font-size: var(--text-xs);">
-          Scroll to zoom · Drag to pan · Key metrics update with visible range
+          ${chartHint}
         </p>
       </div>
 

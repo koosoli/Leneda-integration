@@ -10,6 +10,7 @@ export function renderNavBar(
   theme: ThemeMode = "dark",
 ): string {
   const tabs: { id: Tab; label: string; icon: string }[] = [
+    { id: "charts", label: "Charts", icon: "CH" },
     { id: "dashboard", label: "Dashboard", icon: "🏠" },
     { id: "sensors", label: "Sensors", icon: "📊" },
     { id: "invoice", label: "Invoice", icon: "💰" },

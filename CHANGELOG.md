@@ -3,6 +3,22 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.5.0] - 2026-04-17
+
+### New Features
+- **Dedicated Charts Analysis Page:** Added a new `Charts` tab with a full analysis workspace built from the same 15-minute Leneda data as the dashboard and invoice.
+- **Consumption Pattern Heatmap:** Added a weekday-by-hour heatmap that can switch between `Total Usage`, `Net Grid`, and `Solar Production` to spot night load, weekend behavior, and daytime solar shape quickly.
+- **Solar Coverage Analytics:** Added daily solar coverage trends, self-consumed-versus-exported solar tracking, and a solar-value trend that combines self-consumption savings, export revenue, and avoided exceedance savings.
+- **Reference-Power Deep Dive:** Added reference-power analysis with worst hours, worst days, top exceedance intervals, and direct visibility into exceedance volume and cost.
+- **Period Comparison:** Added matched previous-period comparison charts and summary deltas for house usage, net grid usage, solar coverage, and solar value.
+- **Tariff-Aware Cost Trends:** Added daily charts for import cost, solar savings, export earnings, and exceedance cost so users can connect load behavior directly to money.
+- **Load Duration Curve and Daily Breakdown:** Added a sorted gross-vs-net load duration curve plus a one-glance daily breakdown chart for house usage, grid supply, solar-covered energy, exports, and exceedance markers.
+
+### Improvements
+- **Dashboard Graph Clarity:** Added clearer `Total Usage` and `Net Grid` graph modes, kept `Net Grid` as the default view, and made solar exports render below zero so import and export are easier to distinguish visually.
+- **Chart Interaction Polish:** Switching graph modes or `kW`/`kWh` no longer jumps the page to the top, and the updated labels make the graph intent easier to understand.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.5.0`.
+
 ## [v2.4.0] - 2026-04-17
 
 ### New Features

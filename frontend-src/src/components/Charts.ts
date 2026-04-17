@@ -2,9 +2,10 @@
  * Charts — Chart.js bar chart for energy timeseries visualization.
  *
  * Supports two display modes:
- *  - kW:  Raw 15-min power readings with a reference power limit line.
- *         Bars exceeding the reference are highlighted in red.
- *  - kWh: Aggregated energy view. ≤120 points → raw bars, >120 → daily totals.
+ *  - kW:  Raw 15-min power readings split into house demand covered by solar
+ *         versus remaining draw from the grid, with a reference power limit line.
+ *  - kWh: Energy view using the same source split, aggregated to daily totals
+ *         when the period gets large.
  *
  * Interactive zoom (mouse-wheel / pinch) and pan (drag) on the x-axis.
  * When the visible range changes, an optional onZoomChange callback fires
@@ -36,6 +37,8 @@ let chartInstance: Chart | null = null;
 export interface ChartOptions {
   /** Display unit: "kw" = raw power, "kwh" = energy (auto-aggregated) */
   unit: "kw" | "kwh";
+  /** Visual split: house consumption overlay or explicit grid-draw split. */
+  consumptionView?: "house" | "grid";
   /** Reference power limit in kW. Drawn as a horizontal line in kW mode. */
   referencePowerKw: number;
   /** Called when the user zooms / pans — receives the visible ISO date range. */
@@ -44,54 +47,18 @@ export interface ChartOptions {
   perMeterProduction?: PerMeterTimeseries[];
 }
 
-/** Distinct green/teal/lime shades for per-panel production datasets.
- * Chosen for maximum visual separation in a dark-mode theme. */
-const PRODUCTION_GREENS = [
-  { bg: "rgba(190, 245, 39, 0.80)", border: "#bef527" }, // High-contrast Lime (#BEF527)
-  { bg: "rgba(35, 134, 54, 0.85)", border: "#2ea043" }, // GitHub Emerald
-  { bg: "rgba(0, 150, 136, 0.80)", border: "#009688" }, // Teal
-  { bg: "rgba(111, 219, 139, 0.80)", border: "#6fdb8b" }, // Light Mint
-  { bg: "rgba(0, 77, 64, 0.90)", border: "#004d40" }, // Deep Teal
-  { bg: "rgba(27, 94, 32, 0.90)", border: "#1b5e20" }, // Dark Forest
-  { bg: "rgba(139, 195, 74, 0.80)", border: "#8bc34a" }, // Mossy Green
-  { bg: "rgba(0, 255, 127, 0.70)", border: "#00ff7f" }, // Spring Green
-];
-
 /** A single data point with a real timestamp for time-scale. */
 interface TimePoint {
   x: number;           // ms timestamp
   y: number;
 }
 
-/**
- * Aggregate 15-min power readings (kW) into daily energy totals (kWh).
- * Returns points positioned at midnight of each day.
- */
-function aggregateToDaily(
-  consumptionItems: TimeseriesItem[],
-  productionItems: TimeseriesItem[],
-): { consumption: TimePoint[]; production: TimePoint[] } {
-  const cMap = new Map<string, number>();
-  const pMap = new Map<string, number>();
-
-  for (const item of consumptionItems) {
-    const day = item.startedAt.slice(0, 10);
-    cMap.set(day, (cMap.get(day) ?? 0) + item.value * 0.25);
-  }
-  for (const item of productionItems) {
-    const day = item.startedAt.slice(0, 10);
-    pMap.set(day, (pMap.get(day) ?? 0) + item.value * 0.25);
-  }
-
-  const allDays = [...new Set([...cMap.keys(), ...pMap.keys()])].sort();
-  const consumption: TimePoint[] = [];
-  const production: TimePoint[] = [];
-  for (const day of allDays) {
-    const t = new Date(day + "T12:00:00").getTime();   // midday for nicer display
-    consumption.push({ x: t, y: cMap.get(day) ?? 0 });
-    production.push({ x: t, y: pMap.get(day) ?? 0 });
-  }
-  return { consumption, production };
+interface FlowBreakdownPoint extends TimePoint {
+  consumption: number;
+  production: number;
+  solarToHome: number;
+  gridImport: number;
+  solarExport: number;
 }
 
 /** Build raw 15-min TimePoints (kW) for display. */
@@ -108,6 +75,106 @@ function buildRawTimePoints(
     y: item.value,
   }));
   return { consumption, production };
+}
+
+function buildFlowBreakdown(
+  consumptionPoints: TimePoint[],
+  productionPoints: TimePoint[],
+): FlowBreakdownPoint[] {
+  const pointMap = new Map<number, { consumption: number; production: number }>();
+
+  for (const point of consumptionPoints) {
+    const existing = pointMap.get(point.x) ?? { consumption: 0, production: 0 };
+    existing.consumption += Math.max(0, point.y);
+    pointMap.set(point.x, existing);
+  }
+
+  for (const point of productionPoints) {
+    const existing = pointMap.get(point.x) ?? { consumption: 0, production: 0 };
+    existing.production += Math.max(0, point.y);
+    pointMap.set(point.x, existing);
+  }
+
+  return [...pointMap.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([x, values]) => {
+      const consumption = Math.max(0, values.consumption);
+      const production = Math.max(0, values.production);
+      const solarToHome = Math.max(0, Math.min(consumption, production));
+      const gridImport = Math.max(0, consumption - solarToHome);
+      const solarExport = Math.max(0, production - solarToHome);
+
+      return {
+        x,
+        y: consumption,
+        consumption,
+        production,
+        solarToHome,
+        gridImport,
+        solarExport,
+      };
+    });
+}
+
+function scaleFlowBreakdown(
+  points: FlowBreakdownPoint[],
+  factor: number,
+): FlowBreakdownPoint[] {
+  return points.map((point) => ({
+    ...point,
+    y: point.y * factor,
+    consumption: point.consumption * factor,
+    production: point.production * factor,
+    solarToHome: point.solarToHome * factor,
+    gridImport: point.gridImport * factor,
+    solarExport: point.solarExport * factor,
+  }));
+}
+
+function toLocalDayKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function localDayKeyToTimestamp(dayKey: string): number {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
+}
+
+function aggregateFlowBreakdownToDaily(
+  points: FlowBreakdownPoint[],
+): FlowBreakdownPoint[] {
+  const dayMap = new Map<string, Omit<FlowBreakdownPoint, "x">>();
+
+  for (const point of points) {
+    const day = toLocalDayKey(point.x);
+    const existing = dayMap.get(day) ?? {
+      y: 0,
+      consumption: 0,
+      production: 0,
+      solarToHome: 0,
+      gridImport: 0,
+      solarExport: 0,
+    };
+
+    existing.y += point.y * 0.25;
+    existing.consumption += point.consumption * 0.25;
+    existing.production += point.production * 0.25;
+    existing.solarToHome += point.solarToHome * 0.25;
+    existing.gridImport += point.gridImport * 0.25;
+    existing.solarExport += point.solarExport * 0.25;
+    dayMap.set(day, existing);
+  }
+
+  return [...dayMap.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([day, values]) => ({
+      x: localDayKeyToTimestamp(day),
+      ...values,
+    }));
 }
 
 /**
@@ -182,34 +249,39 @@ export function renderEnergyChart(
     chartInstance = null;
   }
 
-  const { unit, referencePowerKw, onZoomChange } = options;
+  const {
+    unit,
+    referencePowerKw,
+    onZoomChange,
+    consumptionView = "grid",
+  } = options;
   const totalPoints = Math.max(consumption.items.length, production.items.length);
-
-  let cPoints: TimePoint[];
-  let pPoints: TimePoint[];
-  let yLabel: string;
-
-  if (unit === "kwh") {
-    const useDaily = totalPoints > 120;
-    if (useDaily) {
-      const agg = aggregateToDaily(consumption.items, production.items);
-      cPoints = agg.consumption;
-      pPoints = agg.production;
-    } else {
-      const raw = buildRawTimePoints(consumption.items, production.items);
-      cPoints = raw.consumption.map((p) => ({ x: p.x, y: p.y * 0.25 }));
-      pPoints = raw.production.map((p) => ({ x: p.x, y: p.y * 0.25 }));
-    }
-    yLabel = "kWh";
-  } else {
-    const raw = buildRawTimePoints(consumption.items, production.items);
-    cPoints = raw.consumption;
-    pPoints = raw.production;
-    yLabel = "kW";
-  }
+  const rawPoints = buildRawTimePoints(consumption.items, production.items);
+  const rawFlowBreakdown = buildFlowBreakdown(rawPoints.consumption, rawPoints.production);
+  const useDaily = unit === "kwh" && totalPoints > 120;
+  const flowBreakdown =
+    unit === "kw"
+      ? rawFlowBreakdown
+      : useDaily
+        ? aggregateFlowBreakdownToDaily(rawFlowBreakdown)
+        : scaleFlowBreakdown(rawFlowBreakdown, 0.25);
+  const yLabel = unit === "kwh" ? "kWh" : "kW";
 
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
+
+  const flowBreakdownByTs = new Map(flowBreakdown.map((point) => [point.x, point]));
+  const consumptionPoints: TimePoint[] = flowBreakdown.map((point) => ({
+    x: point.x,
+    y: point.consumption,
+  }));
+  const solarToHomePoints: TimePoint[] = flowBreakdown.map((point) => ({ x: point.x, y: point.solarToHome }));
+  const gridImportPoints: TimePoint[] = flowBreakdown.map((point) => ({ x: point.x, y: point.gridImport }));
+  const solarExportPoints: TimePoint[] = flowBreakdown.map((point) => ({ x: point.x, y: point.solarExport }));
+  const solarExportDisplayPoints: TimePoint[] = flowBreakdown.map((point) => ({
+    x: point.x,
+    y: -point.solarExport,
+  }));
 
   const css = getComputedStyle(document.documentElement);
   const clrMuted = css.getPropertyValue("--clr-muted").trim() || "#8b949e";
@@ -218,81 +290,104 @@ export function renderEnergyChart(
   const clrBorder = css.getPropertyValue("--clr-border").trim() || "#30363d";
   const clrOverlay = css.getPropertyValue("--clr-overlay").trim() || "rgba(13, 17, 23, 0.95)";
 
-  const showRefLine = unit === "kw" && referencePowerKw > 0;
+  const isGridView = consumptionView === "grid";
+  const showRefLine = unit === "kw" && referencePowerKw > 0 && isGridView;
+  const hasSolarExport = solarExportPoints.some((point) => point.y > 0.0001);
 
-  // Per-bar coloring for exceedance highlighting
-  const consumptionColors = cPoints.map((p) =>
+  // Remaining grid draw is what matters for reference-power exceedance.
+  const gridImportColors = gridImportPoints.map((p) =>
     showRefLine && p.y > referencePowerKw
       ? "rgba(248, 81, 73, 1)"
       : "rgba(248, 81, 73, 0.55)"
   );
-  const consumptionBorderColors = cPoints.map((p) =>
+  const gridImportBorderColors = gridImportPoints.map((p) =>
     showRefLine && p.y > referencePowerKw ? "#ff3b30" : "#f85149"
   );
 
   // Determine time unit for display based on data span
-  const timestamps = [...cPoints, ...pPoints].map((p) => p.x);
+  const timestamps = flowBreakdown.map((p) => p.x);
   const spanMs = timestamps.length > 1 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
   const spanDays = spanMs / 86_400_000;
-  const timeUnit = spanDays > 14 ? "day" : spanDays > 2 ? "day" : "hour";
+  const timeUnit = useDaily || spanDays > 2 ? "day" : "hour";
   const barPercentage = spanDays > 7 ? 0.85 : 0.65;
+  const datasets = isGridView
+    ? [
+      {
+        label: `Covered by Solar (${yLabel})`,
+        data: solarToHomePoints as any,
+        backgroundColor: "rgba(63, 185, 80, 0.70)",
+        borderColor: "#3fb950",
+        borderWidth: 1,
+        borderRadius: unit === "kwh" ? 4 : 2,
+        barPercentage,
+        stack: "house-usage",
+      },
+      {
+        label: `From Grid (${yLabel})`,
+        data: gridImportPoints as any,
+        backgroundColor: gridImportColors,
+        borderColor: gridImportBorderColors,
+        borderWidth: 1,
+        borderRadius: unit === "kwh" ? 4 : 2,
+        barPercentage,
+        stack: "house-usage",
+      },
+      ...(hasSolarExport
+        ? [{
+          label: `Solar Exported (${yLabel})`,
+          data: solarExportDisplayPoints as any,
+          backgroundColor: "rgba(88, 166, 255, 0.60)",
+          borderColor: "#58a6ff",
+          borderWidth: 1,
+          borderRadius: unit === "kwh" ? 4 : 2,
+          barPercentage,
+          stack: "solar-export",
+        }]
+        : []),
+    ]
+    : [
+      {
+        label: `House Consumption (${yLabel})`,
+        data: consumptionPoints as any,
+        backgroundColor: "rgba(248, 81, 73, 0.45)",
+        borderColor: "#f85149",
+        borderWidth: 1,
+        borderRadius: unit === "kwh" ? 4 : 2,
+        barPercentage,
+        grouped: false,
+        order: 1,
+      },
+      {
+        label: `Covered by Solar (${yLabel})`,
+        data: solarToHomePoints as any,
+        backgroundColor: "rgba(63, 185, 80, 0.85)",
+        borderColor: "#3fb950",
+        borderWidth: 1,
+        borderRadius: unit === "kwh" ? 4 : 2,
+        barPercentage: Math.max(0.42, barPercentage - 0.14),
+        grouped: false,
+        order: 2,
+      },
+      ...(hasSolarExport
+        ? [{
+          label: `Solar Exported (${yLabel})`,
+          data: solarExportDisplayPoints as any,
+          backgroundColor: "rgba(88, 166, 255, 0.60)",
+          borderColor: "#58a6ff",
+          borderWidth: 1,
+          borderRadius: unit === "kwh" ? 4 : 2,
+          barPercentage: Math.min(0.95, barPercentage + 0.1),
+          grouped: false,
+          stack: "solar-export",
+          order: 3,
+        }]
+        : []),
+    ];
 
   const config: ChartConfiguration<"bar"> = {
     type: "bar",
     data: {
-      datasets: [
-        {
-          label: `Consumption (${yLabel})`,
-          data: cPoints as any,
-          backgroundColor: consumptionColors,
-          borderColor: consumptionBorderColors,
-          borderWidth: 1,
-          borderRadius: unit === "kwh" ? 4 : 2,
-          barPercentage,
-          stack: "main",
-        },
-        // Production datasets — one per meter if per-meter data available
-        ...(options.perMeterProduction && options.perMeterProduction.length > 1
-          ? options.perMeterProduction.map((meter, idx) => {
-            const green = PRODUCTION_GREENS[idx % PRODUCTION_GREENS.length];
-            const shortId = meter.meter_id ? "…" + meter.meter_id.slice(-8) : `Panel ${idx + 1}`;
-            const meterPoints: TimePoint[] = unit === "kwh"
-              ? (() => {
-                const useDaily = meter.items.length > 120;
-                if (useDaily) {
-                  const pMap = new Map<string, number>();
-                  for (const item of meter.items) {
-                    const day = item.startedAt.slice(0, 10);
-                    pMap.set(day, (pMap.get(day) ?? 0) + item.value * 0.25);
-                  }
-                  return [...pMap.entries()].sort().map(([day, val]) => ({ x: new Date(day + "T12:00:00").getTime(), y: val }));
-                }
-                return meter.items.map(i => ({ x: new Date(i.startedAt).getTime(), y: i.value * 0.25 }));
-              })()
-              : meter.items.map(i => ({ x: new Date(i.startedAt).getTime(), y: i.value }));
-            return {
-              label: `${shortId} (${yLabel})`,
-              data: meterPoints as any,
-              backgroundColor: green.bg,
-              borderColor: green.border,
-              borderWidth: 1,
-              borderRadius: unit === "kwh" ? 4 : 2,
-              barPercentage,
-              stack: "production",
-            };
-          })
-          : [{
-            label: `Production (${yLabel})`,
-            data: pPoints as any,
-            backgroundColor: "rgba(63, 185, 80, 0.55)",
-            borderColor: "#3fb950",
-            borderWidth: 1,
-            borderRadius: unit === "kwh" ? 4 : 2,
-            barPercentage,
-            stack: "production",
-          }]
-        ),
-      ],
+      datasets: datasets as any,
     },
     options: {
       responsive: true,
@@ -352,17 +447,46 @@ export function renderEnergyChart(
                 : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
             },
             label(tooltipCtx) {
-              const val = (tooltipCtx.parsed.y ?? 0).toFixed(2);
+              const rawValue = tooltipCtx.parsed.y ?? 0;
+              const isExportDataset = tooltipCtx.dataset.label?.startsWith("Solar Exported");
+              const val = (isExportDataset ? Math.abs(rawValue) : rawValue).toFixed(2);
               const line = `${tooltipCtx.dataset.label}: ${val} ${yLabel}`;
               if (
                 showRefLine &&
-                tooltipCtx.datasetIndex === 0 &&
-                (tooltipCtx.parsed.y ?? 0) > referencePowerKw
+                tooltipCtx.dataset.label?.startsWith("From Grid") &&
+                rawValue > referencePowerKw
               ) {
-                const over = ((tooltipCtx.parsed.y ?? 0) - referencePowerKw).toFixed(2);
+                const over = (rawValue - referencePowerKw).toFixed(2);
                 return `${line}  ⚠️ +${over} kW over limit`;
               }
               return line;
+            },
+            footer(items) {
+              if (!items.length) return "";
+              const raw = items[0].raw as TimePoint;
+              const point = flowBreakdownByTs.get(raw.x);
+              if (!point) return "";
+
+              const footer: string[] = [
+                `House total: ${point.consumption.toFixed(2)} ${yLabel}`,
+                `Covered by solar: ${point.solarToHome.toFixed(2)} ${yLabel}`,
+                `From grid: ${point.gridImport.toFixed(2)} ${yLabel}`,
+                `Solar total: ${point.production.toFixed(2)} ${yLabel}`,
+              ];
+
+              if (point.solarExport > 0.0001) {
+                footer.push(`Solar exported: ${point.solarExport.toFixed(2)} ${yLabel}`);
+              }
+
+              if (point.consumption > 0) {
+                footer.push(`Solar-covered share: ${((point.solarToHome / point.consumption) * 100).toFixed(0)}%`);
+              }
+
+              if (showRefLine && point.gridImport > referencePowerKw) {
+                footer.push(`Over reference: ${(point.gridImport - referencePowerKw).toFixed(2)} kW`);
+              }
+
+              return footer;
             },
           },
         },
@@ -419,11 +543,11 @@ export function renderEnergyChart(
           grid: { color: clrBorder },
           // offset: true keeps bars centred on their time tick
           offset: true,
-          stacked: true,
+          stacked: isGridView,
         },
         y: {
           beginAtZero: true,
-          stacked: true,
+          stacked: isGridView,
           ticks: {
             color: clrMuted,
             font: { size: 10 },

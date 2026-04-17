@@ -20,6 +20,7 @@ import {
   type MeterConfig,
 } from "../api/leneda";
 import { renderDashboard } from "./Dashboard";
+import { renderAnalysis } from "./Analysis";
 import { renderSensors } from "./Sensors";
 import { renderInvoice } from "./Invoice";
 import { renderSettings } from "./Settings";
@@ -61,7 +62,15 @@ function saveTheme(theme: ThemeMode): void {
   } catch { /* ignore */ }
 }
 
-export type Tab = "dashboard" | "sensors" | "invoice" | "settings";
+export type Tab = "dashboard" | "charts" | "sensors" | "invoice" | "settings";
+
+export interface AnalysisComparisonData {
+  key: string;
+  start: string;
+  end: string;
+  consumptionTimeseries: TimeseriesResponse | null;
+  productionTimeseries: TimeseriesResponse | null;
+}
 
 export interface AppState {
   tab: Tab;
@@ -69,6 +78,10 @@ export interface AppState {
   customStart: string;
   customEnd: string;
   chartUnit: "kw" | "kwh";
+  chartConsumptionView: "house" | "grid";
+  analysisHeatmapMetric: "house" | "grid" | "solar";
+  analysisComparison: AnalysisComparisonData | null;
+  analysisComparisonLoading: boolean;
   rangeData: RangeData | null;
   consumptionTimeseries: TimeseriesResponse | null;
   productionTimeseries: TimeseriesResponse | null;
@@ -179,6 +192,10 @@ export class LenedaApp {
     customStart: "",
     customEnd: "",
     chartUnit: "kwh",
+    chartConsumptionView: "grid",
+    analysisHeatmapMetric: "grid",
+    analysisComparison: null,
+    analysisComparisonLoading: false,
     rangeData: null,
     consumptionTimeseries: null,
     productionTimeseries: null,
@@ -266,13 +283,88 @@ export class LenedaApp {
     this.state.rangeData = null;
     this.state.consumptionTimeseries = null;
     this.state.productionTimeseries = null;
+    this.state.analysisComparison = null;
+    this.state.analysisComparisonLoading = false;
     this.state.error = this.toDisplayError(error, fallback);
+  }
+
+  private resetAnalysisComparison(): void {
+    this.state.analysisComparison = null;
+    this.state.analysisComparisonLoading = false;
+  }
+
+  private getCurrentRangeKey(): string {
+    const { start, end } = this.getDateRangeISO();
+    return `${start}|${end}`;
+  }
+
+  private getComparisonRangeISO(
+    currentStartIso: string,
+    currentEndIso: string,
+  ): { start: string; end: string } {
+    const currentStartMs = new Date(currentStartIso).getTime();
+    const currentEndMs = new Date(currentEndIso).getTime();
+    const durationMs = Math.max(0, currentEndMs - currentStartMs);
+    const previousEndMs = currentStartMs - 1;
+    const previousStartMs = previousEndMs - durationMs;
+
+    return {
+      start: new Date(previousStartMs).toISOString(),
+      end: new Date(previousEndMs).toISOString(),
+    };
+  }
+
+  private async loadAnalysisComparison(force = false): Promise<void> {
+    if (!this.state.consumptionTimeseries || !this.state.productionTimeseries) return;
+
+    const { start, end } = this.getDateRangeISO();
+    const key = `${start}|${end}`;
+    if (!force) {
+      if (this.state.analysisComparisonLoading) return;
+      if (this.state.analysisComparison?.key === key) return;
+    }
+
+    const comparisonRange = this.getComparisonRangeISO(start, end);
+    this.state.analysisComparisonLoading = true;
+    if (this.state.tab === "charts") {
+      this.renderPreserveMainScroll();
+    }
+
+    try {
+      const [comparisonConsumption, comparisonProduction] = await Promise.all([
+        fetchTimeseries("1-1:1.29.0", comparisonRange.start, comparisonRange.end),
+        fetchTimeseries("1-1:2.29.0", comparisonRange.start, comparisonRange.end),
+      ]);
+
+      if (key !== this.getCurrentRangeKey()) return;
+
+      this.state.analysisComparison = {
+        key,
+        start: comparisonRange.start,
+        end: comparisonRange.end,
+        consumptionTimeseries: comparisonConsumption,
+        productionTimeseries: comparisonProduction,
+      };
+    } catch (error) {
+      console.warn("Comparison data fetch failed:", error);
+      if (key === this.getCurrentRangeKey()) {
+        this.state.analysisComparison = null;
+      }
+    } finally {
+      if (key === this.getCurrentRangeKey()) {
+        this.state.analysisComparisonLoading = false;
+        if (this.state.tab === "charts") {
+          this.renderPreserveMainScroll();
+        }
+      }
+    }
   }
 
   private async loadData(): Promise<void> {
     this.state.loading = true;
     this.state.error = null;
     this.state.rangeData = null; // Clear stale data before fetching
+    this.resetAnalysisComparison();
     this.render();
 
     try {
@@ -296,12 +388,16 @@ export class LenedaApp {
     } finally {
       this.state.loading = false;
       this.render();
+      if (this.state.tab === "charts" && this.state.rangeData) {
+        void this.loadAnalysisComparison();
+      }
     }
   }
 
   private async changeRange(range: TimeRange): Promise<void> {
     this.preZoomRange = null;
     this.state.range = range;
+    this.resetAnalysisComparison();
 
     if (range === "custom") {
       // Set default dates (last 7 days) if not already set
@@ -336,6 +432,9 @@ export class LenedaApp {
     } finally {
       this.state.loading = false;
       this.render();
+      if (this.state.tab === "charts" && this.state.rangeData) {
+        void this.loadAnalysisComparison();
+      }
     }
   }
 
@@ -346,6 +445,7 @@ export class LenedaApp {
 
     this.state.error = null;
     this.state.loading = true;
+    this.resetAnalysisComparison();
     this.render();
 
     try {
@@ -392,6 +492,9 @@ export class LenedaApp {
     } finally {
       this.state.loading = false;
       this.render();
+      if (this.state.tab === "charts" && this.state.rangeData) {
+        void this.loadAnalysisComparison();
+      }
     }
   }
 
@@ -400,8 +503,11 @@ export class LenedaApp {
     this.render();
 
     // Lazy-load data for specific tabs
-    if (tab === "dashboard" && !this.state.rangeData && !this.state.loading) {
+    if ((tab === "dashboard" || tab === "charts") && !this.state.rangeData && !this.state.loading) {
       this.loadData();
+    }
+    if (tab === "charts" && this.state.rangeData && !this.state.analysisComparison && !this.state.analysisComparisonLoading) {
+      this.loadAnalysisComparison();
     }
     if (tab === "sensors" && !this.state.sensors) {
       fetchSensors().then((s) => {
@@ -531,6 +637,9 @@ export class LenedaApp {
       case "dashboard":
         tabContent = renderDashboard(this.state);
         break;
+      case "charts":
+        tabContent = renderAnalysis(this.state);
+        break;
       case "sensors":
         tabContent = renderSensors(this.state.sensors);
         break;
@@ -555,6 +664,7 @@ export class LenedaApp {
     // ── Attach event listeners ──
     this.attachNavListeners();
     this.attachDashboardListeners();
+    this.attachAnalysisListeners();
     this.attachInvoiceListeners();
     this.attachSettingsListeners();
   }
@@ -601,7 +711,17 @@ export class LenedaApp {
         const unit = (btn as HTMLElement).dataset.chartUnit as "kw" | "kwh";
         if (unit !== this.state.chartUnit) {
           this.state.chartUnit = unit;
-          this.render();
+          this.renderPreserveMainScroll();
+        }
+      });
+    });
+
+    this.root.querySelectorAll("[data-chart-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const view = (btn as HTMLElement).dataset.chartView as "house" | "grid";
+        if (view !== this.state.chartConsumptionView) {
+          this.state.chartConsumptionView = view;
+          this.renderPreserveMainScroll();
         }
       });
     });
@@ -638,6 +758,18 @@ export class LenedaApp {
       } else {
         this.changeRange(this.state.range === "custom" ? "yesterday" : this.state.range);
       }
+    });
+  }
+
+  private attachAnalysisListeners(): void {
+    this.root.querySelectorAll("[data-analysis-heatmap]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const metric = (btn as HTMLElement).dataset.analysisHeatmap as "house" | "grid" | "solar";
+        if (metric !== this.state.analysisHeatmapMetric) {
+          this.state.analysisHeatmapMetric = metric;
+          this.renderPreserveMainScroll();
+        }
+      });
     });
   }
 
@@ -1035,6 +1167,7 @@ export class LenedaApp {
 
       renderEnergyChart(canvas, consumption, production, {
         unit: this.state.chartUnit,
+        consumptionView: this.state.chartConsumptionView,
         referencePowerKw,
         perMeterProduction,
         onZoomChange: (zoomStart: string, zoomEnd: string) => {
@@ -1064,6 +1197,7 @@ export class LenedaApp {
       const { fetchCustomData } = await import("../api/leneda");
       const startDate = start.slice(0, 10);
       const endDate = end.slice(0, 10);
+      this.resetAnalysisComparison();
       const data = await fetchCustomData(startDate, endDate);
       const [consumptionTimeseries, productionTimeseries] = await Promise.all([
         fetchTimeseries(

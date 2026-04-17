@@ -1,0 +1,168 @@
+[2m17:36:06[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+[2m17:36:06[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+      at TransformPluginContext._formatLog (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42528:41)
+      at TransformPluginContext.error (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42525:16)
+      at normalizeUrl (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40504:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40623:37
+      at async Promise.all (index 2)
+      at async TransformPluginContext.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40550:7)
+      at async EnvironmentPluginContainer.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42323:18)
+      at async loadAndTransform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:35739:27)
+      at async viteTransformMiddleware (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:37254:24)
+[2m17:36:12[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+[2m17:36:12[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+      at TransformPluginContext._formatLog (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42528:41)
+      at TransformPluginContext.error (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42525:16)
+      at normalizeUrl (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40504:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40623:37
+      at async Promise.all (index 2)
+      at async TransformPluginContext.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40550:7)
+      at async EnvironmentPluginContainer.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42323:18)
+      at async loadAndTransform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:35739:27)
+      at async viteTransformMiddleware (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:37254:24)
+[2m17:36:18[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+[2m17:36:18[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+      at TransformPluginContext._formatLog (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42528:41)
+      at TransformPluginContext.error (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42525:16)
+      at normalizeUrl (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40504:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40623:37
+      at async Promise.all (index 2)
+      at async TransformPluginContext.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40550:7)
+      at async EnvironmentPluginContainer.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42323:18)
+      at async loadAndTransform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:35739:27)
+      at async viteTransformMiddleware (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:37254:24)
+[2m17:36:28[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+[2m17:36:28[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+      at TransformPluginContext._formatLog (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42528:41)
+      at TransformPluginContext.error (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42525:16)
+      at normalizeUrl (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40504:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40623:37
+      at async Promise.all (index 2)
+      at async TransformPluginContext.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40550:7)
+      at async EnvironmentPluginContainer.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42323:18)
+      at async loadAndTransform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:35739:27)
+      at async viteTransformMiddleware (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:37254:24)
+[2m17:36:44[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+[2m17:36:44[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+      at TransformPluginContext._formatLog (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42528:41)
+      at TransformPluginContext.error (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42525:16)
+      at normalizeUrl (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40504:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40623:37
+      at async Promise.all (index 2)
+      at async TransformPluginContext.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40550:7)
+      at async EnvironmentPluginContainer.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42323:18)
+      at async loadAndTransform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:35739:27)
+      at async viteTransformMiddleware (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:37254:24)
+[2m17:37:00[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+[2m17:37:00[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "./Analysis" from "src/components/App.ts". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/src/components/App.ts[39m:23:31
+[33m  9  |  } from "../api/leneda";
+  10 |  import { renderDashboard } from "./Dashboard";
+  11 |  import { renderAnalysis } from "./Analysis";
+     |                                  ^
+  12 |  import { renderSensors } from "./Sensors";
+  13 |  import { renderInvoice } from "./Invoice";[39m
+      at TransformPluginContext._formatLog (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42528:41)
+      at TransformPluginContext.error (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42525:16)
+      at normalizeUrl (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40504:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40623:37
+      at async Promise.all (index 2)
+      at async TransformPluginContext.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:40550:7)
+      at async EnvironmentPluginContainer.transform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:42323:18)
+      at async loadAndTransform (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:35739:27)
+      at async viteTransformMiddleware (file:///C:/Users/mail/OneDrive/Documents/GitHub/Leneda-integration/frontend-src/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:37254:24)
