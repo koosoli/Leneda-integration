@@ -3,6 +3,16 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.4.0] - 2026-04-17
+
+### New Features
+- **Solar Value Breakdown in Invoice:** Expanded the main invoice view to show solar production, autoconsumed energy savings, exported-energy revenue, and a single combined `Total saved / earned thanks to solar` figure for the selected period.
+- **Reference-Power Savings from Solar:** Added invoice tracking for exceedance charges avoided when concurrent solar production shaves the net 15-minute load below the configured reference power level.
+
+### Improvements
+- **Solar Revenue Card Rollup:** Updated the dedicated solar value card so the panel worth now includes self-consumption savings, avoided reference-power exceedance, and export revenue in one combined solar value summary.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.4.0`.
+
 ## [v2.3.0] - 2026-04-16
 
 ### Bug Fixes
