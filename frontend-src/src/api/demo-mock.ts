@@ -1,13 +1,13 @@
 /**
- * Browser-side standalone client for GitHub Pages / Demo mode.
+ * Browser-side client for the GitHub Pages / demo build.
  *
- * Mirrors the logic of dev/dev-server-plugin.ts but runs entirely in the
- * browser (no Node.js APIs).
+ * This build cannot call https://api.leneda.eu directly because the Leneda API
+ * rejects browser CORS requests from GitHub Pages. Instead, the hosted frontend
+ * supports two modes:
  *
- * - Credentials are stored in localStorage.
- * - When real credentials are saved via Settings → fetches live data
- *   directly from https://api.leneda.eu
- * - When no credentials → returns realistic mock data for demo purposes.
+ * - no proxy URL: realistic mock data for demos
+ * - proxy URL configured: forwards calls to a Leneda-compatible proxy
+ *   (for example the standalone server in this repo)
  *
  * This module is ONLY bundled when VITE_DEMO_MODE is set at build time.
  * Normal builds (HA + local dev) tree-shake this entire file away.
@@ -25,14 +25,11 @@ import type {
   PerMeterTimeseriesResponse,
 } from "./leneda";
 
-// ═══════════════════════════════════════════════════════════════
-//  Credential storage (localStorage)
-// ═══════════════════════════════════════════════════════════════
-
 interface StoredCreds {
   api_key: string;
   energy_id: string;
   meters: Array<{ id: string; types: string[] }>;
+  proxy_url?: string;
 }
 
 const LS_CREDS = "leneda_demo_creds";
@@ -40,34 +37,85 @@ const LS_BILLING = "leneda_demo_billing";
 
 function loadCreds(): StoredCreds | null {
   try {
-    const s = localStorage.getItem(LS_CREDS);
-    if (s) {
-      const c = JSON.parse(s) as StoredCreds;
-      if (c.api_key && c.energy_id && c.meters?.length) return c;
-    }
-  } catch { /* ignore */ }
+    const raw = localStorage.getItem(LS_CREDS);
+    if (!raw) return null;
+    const creds = JSON.parse(raw) as StoredCreds;
+    if (creds.api_key && creds.energy_id && creds.meters?.length) return creds;
+    if (creds.proxy_url) return creds;
+  } catch {
+    // Ignore invalid localStorage content.
+  }
   return null;
 }
 
 function saveCreds(creds: StoredCreds): void {
-  try { localStorage.setItem(LS_CREDS, JSON.stringify(creds)); } catch { /* */ }
+  try {
+    localStorage.setItem(LS_CREDS, JSON.stringify(creds));
+  } catch {
+    // Ignore storage write failures.
+  }
 }
 
 function hasRealCreds(): boolean {
-  const c = loadCreds();
+  const creds = loadCreds();
   return !!(
-    c &&
-    c.api_key &&
-    !c.api_key.startsWith("\u2022") &&
-    c.energy_id &&
-    c.meters?.length > 0 &&
-    c.meters[0].id
+    creds &&
+    creds.api_key &&
+    !creds.api_key.startsWith("\u2022") &&
+    creds.energy_id &&
+    creds.meters?.length > 0 &&
+    creds.meters[0].id
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Billing config storage (localStorage)
-// ═══════════════════════════════════════════════════════════════
+function normalizeProxyUrl(value: string | undefined | null): string {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  return withScheme.replace(/\/+$/, "").replace(/\/leneda_api$/i, "");
+}
+
+function getProxyUrl(): string {
+  return normalizeProxyUrl(loadCreds()?.proxy_url);
+}
+
+function hasProxyUrl(): boolean {
+  return getProxyUrl().length > 0;
+}
+
+async function proxyFetch<T>(path: string, init?: RequestInit, proxyUrlOverride?: string): Promise<T> {
+  const baseUrl = normalizeProxyUrl(proxyUrlOverride) || getProxyUrl();
+  if (!baseUrl) {
+    throw new Error("No proxy URL configured");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      credentials: "omit",
+      headers: {
+        ...(init?.headers as Record<string, string> | undefined),
+      },
+    });
+  } catch {
+    throw new Error(`Could not reach proxy at ${baseUrl}`);
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    let detail = "";
+    if (contentType.includes("application/json")) {
+      const body = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+      detail = String(body?.message ?? body?.error ?? "").trim();
+    } else {
+      detail = (await response.text().catch(() => "")).trim();
+    }
+    throw new Error(detail || `Proxy ${response.status}: ${response.statusText}`);
+  }
+
+  return response.json() as Promise<T>;
+}
 
 function defaultBilling(): BillingConfig {
   return {
@@ -109,19 +157,21 @@ function defaultBilling(): BillingConfig {
 
 function loadBilling(): BillingConfig {
   try {
-    const s = localStorage.getItem(LS_BILLING);
-    if (s) return JSON.parse(s);
-  } catch { /* ignore */ }
+    const raw = localStorage.getItem(LS_BILLING);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // Ignore invalid localStorage content.
+  }
   return defaultBilling();
 }
 
-function saveBillingToStorage(cfg: BillingConfig): void {
-  try { localStorage.setItem(LS_BILLING, JSON.stringify(cfg)); } catch { /* */ }
+function saveBillingToStorage(config: BillingConfig): void {
+  try {
+    localStorage.setItem(LS_BILLING, JSON.stringify(config));
+  } catch {
+    // Ignore storage write failures.
+  }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  MOCK data (when no real credentials)
-// ═══════════════════════════════════════════════════════════════
 
 function jitter(base: number, pct = 0.15): number {
   return +(base * (1 + (Math.random() * 2 - 1) * pct)).toFixed(4);
@@ -129,8 +179,11 @@ function jitter(base: number, pct = 0.15): number {
 
 function yesterdayRange(): { start: Date; end: Date } {
   const now = new Date();
-  const start = new Date(now); start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0);
-  const end = new Date(start); end.setHours(23, 59, 59, 999);
+  const start = new Date(now);
+  start.setDate(start.getDate() - 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setHours(23, 59, 59, 999);
   return { start, end };
 }
 
@@ -165,130 +218,222 @@ const MOCK_SENSORS: SensorsResponse = {
 };
 
 function generateTimeseries(obis: string, baseValue: number, startDate?: Date, endDate?: Date): TimeseriesResponse {
-  const { start: defStart, end: defEnd } = yesterdayRange();
-  const start = startDate ?? defStart;
-  const end = endDate ?? defEnd;
+  const { start: defaultStart, end: defaultEnd } = yesterdayRange();
+  const start = startDate ?? defaultStart;
+  const end = endDate ?? defaultEnd;
   const durationMs = end.getTime() - start.getTime();
   const numIntervals = Math.max(1, Math.min(2000, Math.ceil(durationMs / (15 * 60_000))));
 
-  const items = Array.from({ length: numIntervals }, (_, i) => {
-    const ts = new Date(start.getTime() + i * 15 * 60_000);
-    const hour = ts.getHours() + ts.getMinutes() / 60;
+  const items = Array.from({ length: numIntervals }, (_, index) => {
+    const timestamp = new Date(start.getTime() + index * 15 * 60_000);
+    const hour = timestamp.getHours() + timestamp.getMinutes() / 60;
     let multiplier = 1;
     if (obis.includes(":2.29.0")) {
       multiplier = hour >= 6 && hour <= 20 ? Math.exp(-0.5 * ((hour - 13) / 3) ** 2) : 0;
     } else {
       multiplier = 0.3 + 0.4 * Math.exp(-0.5 * ((hour - 8) / 2) ** 2) + 0.5 * Math.exp(-0.5 * ((hour - 19) / 2) ** 2);
     }
-    return { value: +(baseValue * multiplier * jitter(1, 0.1)).toFixed(3), startedAt: ts.toISOString(), type: "Measured", version: 1, calculated: false };
+    return {
+      value: +(baseValue * multiplier * jitter(1, 0.1)).toFixed(3),
+      startedAt: timestamp.toISOString(),
+      type: "Measured",
+      version: 1,
+      calculated: false,
+    };
   });
 
   return { obis, unit: "kW", interval: "PT15M", items };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Exported demo object — used by leneda.ts when IS_DEMO is true
-// ═══════════════════════════════════════════════════════════════
-
 export const demo = {
-  // ── Mode ──────────────────────────────────────────────────────
   async fetchMode(): Promise<AppMode> {
-    return { mode: "standalone", configured: hasRealCreds() };
+    if (hasProxyUrl()) {
+      try {
+        return await proxyFetch<AppMode>("/leneda_api/mode");
+      } catch {
+        return { mode: "standalone", configured: false };
+      }
+    }
+    return { mode: "standalone", configured: false };
   },
 
-  // ── Credentials ───────────────────────────────────────────────
   async fetchCredentials(): Promise<Credentials> {
-    const c = loadCreds();
-    if (c) {
+    const proxyUrl = getProxyUrl();
+    if (proxyUrl) {
+      try {
+        const remote = await proxyFetch<Credentials>("/leneda_api/credentials");
+        return { ...remote, proxy_url: proxyUrl };
+      } catch {
+        // Fall back to local draft values if the proxy is offline.
+      }
+    }
+
+    const creds = loadCreds();
+    if (creds) {
       return {
-        api_key: c.api_key ? "\u2022\u2022\u2022\u2022" + c.api_key.slice(-4) : "",
-        energy_id: c.energy_id,
-        meters: c.meters as MeterConfig[],
+        api_key: creds.api_key ? "\u2022\u2022\u2022\u2022" + creds.api_key.slice(-4) : "",
+        energy_id: creds.energy_id,
+        meters: creds.meters as MeterConfig[],
+        proxy_url: normalizeProxyUrl(creds.proxy_url),
       };
     }
-    return { api_key: "", energy_id: "", meters: [{ id: "", types: ["consumption"] }] as MeterConfig[] };
+
+    return {
+      api_key: "",
+      energy_id: "",
+      meters: [{ id: "", types: ["consumption"] }] as MeterConfig[],
+      proxy_url: "",
+    };
   },
 
   async saveCredentials(creds: Credentials): Promise<void> {
-    const prev = loadCreds() ?? { api_key: "", energy_id: "", meters: [] };
+    const prev = loadCreds() ?? { api_key: "", energy_id: "", meters: [], proxy_url: "" };
     const updated: StoredCreds = {
       api_key: (creds.api_key && !creds.api_key.startsWith("\u2022")) ? creds.api_key : prev.api_key,
       energy_id: creds.energy_id !== undefined ? creds.energy_id : prev.energy_id,
       meters: Array.isArray(creds.meters) ? creds.meters : prev.meters,
+      proxy_url: normalizeProxyUrl(creds.proxy_url ?? prev.proxy_url),
     };
     saveCreds(updated);
+
+    if (updated.proxy_url) {
+      await proxyFetch<{ status: string }>("/leneda_api/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: updated.api_key,
+          energy_id: updated.energy_id,
+          meters: updated.meters,
+        }),
+      });
+    }
   },
 
   async testCredentials(creds: Credentials): Promise<{ success: boolean; message: string }> {
+    const proxyUrl = normalizeProxyUrl(creds.proxy_url ?? loadCreds()?.proxy_url);
     const testKey = (creds.api_key && !creds.api_key.startsWith("\u2022")) ? creds.api_key : loadCreds()?.api_key ?? "";
     const testEnergyId = creds.energy_id || loadCreds()?.energy_id || "";
     const testMeters = Array.isArray(creds.meters) && creds.meters.length ? creds.meters : loadCreds()?.meters ?? [];
     const firstId = testMeters[0]?.id;
 
+    if (!proxyUrl) {
+      return {
+        success: false,
+        message: "GitHub Pages cannot call the Leneda API directly. Add a proxy URL or use the standalone dashboard / Home Assistant for live data.",
+      };
+    }
+
     if (!testKey || !testEnergyId || !firstId) {
       return { success: false, message: "Missing API key, energy ID, or metering point" };
     }
 
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({ success: true, message: `Connection successful! Tested meter …${firstId.slice(-8)} (Demo Mode)` });
-      }, 800);
-    });
+    return proxyFetch<{ success: boolean; message: string }>("/leneda_api/credentials/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: testKey,
+        energy_id: testEnergyId,
+        meters: testMeters,
+      }),
+    }, proxyUrl);
   },
 
-  // ── Config ────────────────────────────────────────────────────
   async fetchConfig(): Promise<BillingConfig> {
-    const cfg = loadBilling();
-    // Overlay real meters into config if credentials are saved
-    if (hasRealCreds()) {
-      const c = loadCreds()!;
-      (cfg as any).meters = c.meters.map((m) => ({ id: m.id, types: m.types }));
-      (cfg as any).meter_has_gas = c.meters.some((m) => m.types.includes("gas"));
+    if (hasProxyUrl()) {
+      return proxyFetch<BillingConfig>("/leneda_api/config");
     }
-    return cfg;
+
+    const config = loadBilling();
+    if (hasRealCreds()) {
+      const creds = loadCreds()!;
+      (config as BillingConfig & { meters?: MeterConfig[] }).meters = creds.meters.map((meter) => ({
+        id: meter.id,
+        types: meter.types as MeterConfig["types"],
+      }));
+      (config as BillingConfig & { meter_has_gas?: boolean }).meter_has_gas = creds.meters.some((meter) => meter.types.includes("gas"));
+    }
+    return config;
   },
 
   async saveConfig(partial: Partial<BillingConfig> | Record<string, any>): Promise<void> {
-    const cur = loadBilling();
-    saveBillingToStorage({ ...cur, ...partial } as BillingConfig);
+    if (hasProxyUrl()) {
+      await proxyFetch<{ status: string }>("/leneda_api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(partial),
+      });
+      return;
+    }
+    const current = loadBilling();
+    saveBillingToStorage({ ...current, ...partial } as BillingConfig);
   },
 
   async resetConfig(): Promise<void> {
+    if (hasProxyUrl()) {
+      await proxyFetch<{ status: string }>("/leneda_api/config/reset", { method: "POST" });
+      return;
+    }
     saveBillingToStorage(defaultBilling());
   },
 
-  // ── Data (strictly mock) ────────────────
   async fetchRangeData(range: string): Promise<RangeData> {
+    if (hasProxyUrl()) {
+      return proxyFetch<RangeData>(`/leneda_api/data?range=${encodeURIComponent(range)}`);
+    }
     return RANGE_DATA[range] ?? RANGE_DATA.yesterday;
   },
 
   async fetchCustomData(start: string, end: string): Promise<CustomRangeData> {
+    if (hasProxyUrl()) {
+      return proxyFetch<CustomRangeData>(
+        `/leneda_api/data/custom?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+      );
+    }
     return { consumption: 42.5, production: 28.3, peak_power_kw: 5.8, exceedance_kwh: 1.24, start, end };
   },
 
   async fetchTimeseries(obis: string, start?: string, end?: string): Promise<TimeseriesResponse> {
+    if (hasProxyUrl()) {
+      let url = `/leneda_api/data/timeseries?obis=${encodeURIComponent(obis)}`;
+      if (start) url += `&start=${encodeURIComponent(start)}`;
+      if (end) url += `&end=${encodeURIComponent(end)}`;
+      return proxyFetch<TimeseriesResponse>(url);
+    }
     const base = obis.includes(":2.29.0") ? 4.5 : 2.0;
     return generateTimeseries(obis, base, start ? new Date(start) : undefined, end ? new Date(end) : undefined);
   },
 
   async fetchPerMeterTimeseries(obis: string, start?: string, end?: string): Promise<PerMeterTimeseriesResponse> {
-    // Static mock: split the single mock timeseries into two fake meters
-    const t = generateTimeseries(obis, 4.5, start ? new Date(start) : undefined, end ? new Date(end) : undefined);
-    const m1 = JSON.parse(JSON.stringify(t));
-    const m2 = JSON.parse(JSON.stringify(t));
-    m1.items.forEach((it: any) => it.value = +(it.value * 0.6).toFixed(3));
-    m2.items.forEach((it: any) => it.value = +(it.value * 0.4).toFixed(3));
+    if (hasProxyUrl()) {
+      let url = `/leneda_api/data/timeseries/per-meter?obis=${encodeURIComponent(obis)}`;
+      if (start) url += `&start=${encodeURIComponent(start)}`;
+      if (end) url += `&end=${encodeURIComponent(end)}`;
+      return proxyFetch<PerMeterTimeseriesResponse>(url);
+    }
+
+    const series = generateTimeseries(obis, 4.5, start ? new Date(start) : undefined, end ? new Date(end) : undefined);
+    const first = JSON.parse(JSON.stringify(series));
+    const second = JSON.parse(JSON.stringify(series));
+    first.items.forEach((item: { value: number }) => {
+      item.value = +(item.value * 0.6).toFixed(3);
+    });
+    second.items.forEach((item: { value: number }) => {
+      item.value = +(item.value * 0.4).toFixed(3);
+    });
 
     return {
       obis,
       meters: [
-        { meter_id: "DEMO_PANEL_1", ...m1 },
-        { meter_id: "DEMO_PANEL_2", ...m2 },
+        { meter_id: "DEMO_PANEL_1", ...first },
+        { meter_id: "DEMO_PANEL_2", ...second },
       ],
     };
   },
 
   async fetchSensors(): Promise<SensorsResponse> {
+    if (hasProxyUrl()) {
+      return proxyFetch<SensorsResponse>("/leneda_api/sensors");
+    }
     return MOCK_SENSORS;
   },
 };

@@ -190,6 +190,7 @@ export interface Credentials {
   api_key: string;
   energy_id: string;
   meters: MeterConfig[];
+  proxy_url?: string;
 }
 
 function normalizeCredentials(creds: Credentials): Credentials {
@@ -200,6 +201,7 @@ function normalizeCredentials(creds: Credentials): Credentials {
       ...meter,
       id: (meter.id ?? "").trim(),
     })),
+    proxy_url: (creds.proxy_url ?? "").trim(),
   };
 }
 

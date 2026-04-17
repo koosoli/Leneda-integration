@@ -591,15 +591,39 @@ export class LenedaApp {
     this.restoreMainContentScrollTop(scrollTop);
   }
 
+  private getDataSourceLabel(): string {
+    if (this.state.mode === "ha") return "Home Assistant";
+    if (!!import.meta.env.VITE_DEMO_MODE) {
+      return (this.state.credentials?.proxy_url ?? "").trim() ? "Proxy Mode" : "Demo Data";
+    }
+    return "Standalone";
+  }
+
+  private getHostedDataNoticeHtml(): string {
+    const isDemoBuild = !!import.meta.env.VITE_DEMO_MODE;
+    const hasProxy = (this.state.credentials?.proxy_url ?? "").trim().length > 0;
+    if (!isDemoBuild || hasProxy) return "";
+
+    return `
+      <section class="app-notice app-notice-info">
+        <strong>Demo Data</strong>
+        <p>This hosted dashboard is showing demo data. For live data, use Home Assistant, the standalone app, or connect a proxy in Settings.</p>
+      </section>
+    `;
+  }
+
   private render(): void {
     const { tab, loading, error, theme } = this.state;
+    const dataSourceLabel = this.getDataSourceLabel();
+    const hostedDataNotice = this.getHostedDataNoticeHtml();
 
     // ── Skeleton while loading ──
     if (loading && !this.state.rangeData) {
       this.root.innerHTML = `
         <div class="app-shell">
-          ${renderNavBar(tab, (_t) => { }, false, theme)}
+          ${renderNavBar(tab, (_t) => { }, false, theme, dataSourceLabel)}
           <main class="main-content">
+            ${hostedDataNotice}
             <div class="loading-state">
               <div class="spinner"></div>
               <p>Loading Leneda data…</p>
@@ -616,8 +640,9 @@ export class LenedaApp {
       const missingData = error.toLowerCase().includes("missing data");
       this.root.innerHTML = `
         <div class="app-shell">
-          ${renderNavBar(tab, (_t) => { }, false, theme)}
+          ${renderNavBar(tab, (_t) => { }, false, theme, dataSourceLabel)}
           <main class="main-content">
+            ${hostedDataNotice}
             <div class="error-state">
               <h2>${missingData ? "Missing Data" : "Connection Error"}</h2>
               <p>${missingData ? "The selected period could not be loaded because data is missing." : error}</p>
@@ -653,8 +678,9 @@ export class LenedaApp {
 
     this.root.innerHTML = `
       <div class="app-shell">
-        ${renderNavBar(tab, (t) => this.changeTab(t), this.state.isMenuOpen, theme)}
+        ${renderNavBar(tab, (t) => this.changeTab(t), this.state.isMenuOpen, theme, dataSourceLabel)}
         <main class="main-content">
+          ${hostedDataNotice}
           ${loading ? '<div class="loading-bar"></div>' : ""}
           ${tabContent}
         </main>
@@ -796,6 +822,7 @@ export class LenedaApp {
             api_key: (fd.get("api_key") as string) || this.state.credentials?.api_key || "",
             energy_id: (fd.get("energy_id") as string) || this.state.credentials?.energy_id || "",
             meters,
+            proxy_url: (fd.get("proxy_url") as string) || this.state.credentials?.proxy_url || "",
           };
           this.state.credentials = updated;
           saveLocalCredentials(updated);
@@ -814,6 +841,7 @@ export class LenedaApp {
             api_key: (fd.get("api_key") as string) || this.state.credentials?.api_key || "",
             energy_id: (fd.get("energy_id") as string) || this.state.credentials?.energy_id || "",
             meters,
+            proxy_url: (fd.get("proxy_url") as string) || this.state.credentials?.proxy_url || "",
           };
           this.state.credentials = updated;
           saveLocalCredentials(updated);
@@ -843,6 +871,7 @@ export class LenedaApp {
           api_key: fd.get("api_key") as string,
           energy_id: fd.get("energy_id") as string,
           meters: collectMetersFromForm(fd),
+          proxy_url: fd.get("proxy_url") as string,
         };
         const statusEl = this.root.querySelector("#creds-status");
         try {
@@ -855,6 +884,14 @@ export class LenedaApp {
           // Update state from localStorage (source of truth — unmasked)
           this.state.credentials = creds;
           this.state.error = null;
+          const isDemoBuild = !!import.meta.env.VITE_DEMO_MODE;
+          const proxyUrl = (creds.proxy_url ?? "").trim();
+          if (isDemoBuild && !proxyUrl) {
+            if (statusEl) {
+              statusEl.innerHTML = '<p style="color: var(--clr-warning); padding: var(--sp-3) 0;">Live credentials were saved locally, but GitHub Pages still needs a proxy URL to show live data. Until then this hosted dashboard will stay on demo data.</p>';
+            }
+            return;
+          }
           await this.loadData();
         } catch (err) {
           if (statusEl) statusEl.innerHTML = `<p style="color: var(--clr-danger); padding: var(--sp-3) 0;">✗ Save failed: ${err instanceof Error ? err.message : err}</p>`;
@@ -868,6 +905,7 @@ export class LenedaApp {
           api_key: fd.get("api_key") as string,
           energy_id: fd.get("energy_id") as string,
           meters: collectMetersFromForm(fd),
+          proxy_url: fd.get("proxy_url") as string,
         };
         const statusEl = this.root.querySelector("#creds-status");
         if (statusEl) statusEl.innerHTML = '<p style="color: var(--clr-muted); padding: var(--sp-3) 0;">Testing connection…</p>';

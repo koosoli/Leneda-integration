@@ -8,6 +8,7 @@ export function renderNavBar(
   _onTabChange: (tab: Tab) => void,
   isMenuOpen = false,
   theme: ThemeMode = "dark",
+  dataSourceLabel = "",
 ): string {
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "charts", label: "Charts", icon: "CH" },
@@ -21,6 +22,7 @@ export function renderNavBar(
     <header class="navbar" role="navigation" aria-label="Main navigation">
       <div class="navbar-brand">
         <img src="${import.meta.env.BASE_URL}logo.png" srcset="${import.meta.env.BASE_URL}logo@2x.png 2x" alt="Leneda Logo" class="navbar-logo-img" />
+        ${dataSourceLabel ? `<span class="navbar-badge">${dataSourceLabel}</span>` : ""}
  
         <button class="menu-toggle ${isMenuOpen ? "open" : ""}" aria-label="Toggle menu" aria-expanded="${isMenuOpen}">
           <span></span>

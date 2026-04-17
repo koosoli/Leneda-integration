@@ -287,6 +287,7 @@ export function renderSettings(
   mode: "ha" | "standalone" = "ha",
   credentials?: Credentials | null,
 ): string {
+  const isDemoBuild = !!import.meta.env.VITE_DEMO_MODE;
   if (!config && mode === "ha") {
     return `
       <section class="settings-view">
@@ -306,13 +307,25 @@ export function renderSettings(
   let credentialsSection = "";
   if (mode === "standalone") {
     const meterCards = meters.map((m, i) => renderMeterRow(i, m, false)).join("");
+    const proxyUrl = credentials?.proxy_url ?? "";
+    const hostedNotice = isDemoBuild ? `
+      <div class="settings-note settings-note-warning">
+        <strong>Hosted mode uses demo data unless a proxy is configured.</strong>
+        <p>
+          The GitHub Pages dashboard cannot call <code>api.leneda.eu</code> directly because the Leneda API blocks
+          browser CORS requests. To see live data here, enter a proxy URL below. The standalone server in this repo
+          works as that proxy, for example <code>http://127.0.0.1:5175</code>.
+        </p>
+      </div>
+    ` : "";
     credentialsSection = `
       <div class="section-header">
         <h2>API Connection</h2>
-        <span class="muted">Configure your Leneda API credentials and metering points</span>
+        <span class="muted">${isDemoBuild ? "Configure your Leneda connection, proxy, and metering points" : "Configure your Leneda API credentials and metering points"}</span>
       </div>
       <div class="card" style="margin-bottom: var(--sp-6);">
         <form id="credentials-form">
+          ${hostedNotice}
           <div class="form-section">
             <div class="form-section-title">🔑  Leneda API Credentials</div>
             <div class="form-row">
@@ -339,6 +352,20 @@ export function renderSettings(
                 />
               </div>
             </div>
+            ${isDemoBuild ? `
+            <div class="form-row">
+              <label for="cfg-proxy_url">Proxy URL</label>
+              <div class="input-group">
+                <input
+                  id="cfg-proxy_url"
+                  name="proxy_url"
+                  type="text"
+                  value="${proxyUrl}"
+                  placeholder="http://127.0.0.1:5175"
+                />
+              </div>
+            </div>
+            ` : ""}
           </div>
 
           <div class="form-section">
