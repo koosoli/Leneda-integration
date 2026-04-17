@@ -1,4 +1,4 @@
-# ⚡ Leneda HACS Integration
+# Leneda for Home Assistant and Standalone Use
 
 <p align="center">
   <img src="logo/logo@2x.png" alt="Leneda Logo" width="300">
@@ -7,89 +7,124 @@
 <p align="center">
 
 ![HACS Default](https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge&logo=homeassistant)
-![Version](https://img.shields.io/github/v/release/koosoli/Leneda-HACS-integration?style=for-the-badge&color=blue)
-[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-Try_it_now!-00C853?style=for-the-badge)](https://koosoli.github.io/Leneda-integration/)
+![Version](https://img.shields.io/github/v/release/koosoli/Leneda-integration?style=for-the-badge&color=blue)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Try_it_now-00C853?style=for-the-badge)](https://koosoli.github.io/Leneda-integration/)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support%20my%20work-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/koosoli)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-koosoli-EA4AAA?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/koosoli)
 
 </p>
 
-> **The ultimate energy monitoring experience for Leneda smart meters in Luxembourg.**  
-> Completely rewritten from the ground up to offer an "Avant-Garde" visualization, robust device consolidation, and seamless integration.
+Leneda is a Home Assistant integration and dashboard for Leneda smart meters in Luxembourg. It combines electricity, solar production, gas, billing logic, reference-power analysis, and solar-value tracking in one interface, and it can also run outside Home Assistant as a standalone web app.
 
----
+## What It Does
 
-## 🌟 What's New in v2.0?
+- Connects to the Leneda API and pulls electricity and gas data into Home Assistant.
+- Groups configured meters into one coherent Leneda device experience instead of forcing you to assemble everything manually.
+- Provides a custom dashboard with Dashboard, Sensors, Invoice, and Settings views.
+- Supports Home Assistant mode, standalone local mode, and a hosted demo.
 
-This isn't just an update; it's a **whole new software**:
-- **🎨 Avant-Garde Dashboard**: A stunning, custom-built energy dashboard with glassmorphism, animated flows, and comprehensive stats.
-- **🧩 Device Consolidation**: Automatically groups consumption, production, and gas meters into a single, logical "Leneda" device.
-- **⚡ Real-Time Flow**: (Simulated) real-time animations based on your daily data to visualize energy movement.
-- **🔋 Energy Community Support**: Native support for tracking shared energy within communities.
-- **🛠️ Self-Repairing**: Automatically handles API outages and preserves sensor states.
+## Features
 
----
+### Energy Monitoring
 
-## 🚀 Features
+- Consumption, production, export, self-consumption, grid import, and gas tracking.
+- Support for consumption meters, production meters, gas meters, and mixed setups.
+- Aggregated totals across multiple production meters.
+- Community-energy visibility for shared energy sent and received.
+- Preset periods such as yesterday, this week, last week, this month, last month, this year, and last year.
+- Custom date ranges for ad hoc analysis.
 
-### 📊 Smart Energy Monitoring
-- **Complete History**: Access yesterday's, last week's, and last month's data with pinpoint accuracy.
-- **Gas Integration**: Full support for gas volume (m³) and energy (kWh).
-- **Zero-Config Calculations**: Automatically calculates self-consumption, grid export, and community sharing without complex templates.
+### Dashboard and Analysis
 
-### 💎 The "Elite" Visual Experience
-The integration includes a standalone dashboard panel that provides:
-- **Interactive Graphs**: Zoomable, panning charts for granular analysis.
-- **Visual Flow**: Beautifully animated energy flow diagrams.
-- **Metric Insights**: Instant visibility into peak power, self-sufficiency, and costs.
+- Interactive dashboard with energy overview cards, energy-flow visualization, and range switching.
+- Zoomable and pannable charts for detailed inspection of the selected period.
+- Optional per-meter solar production charting when multiple production meters exist.
+- Automatic recalculation of key metrics and invoice context when the visible chart range changes.
+- Light and dark mode support.
+- Responsive layouts for desktop and mobile.
 
----
+### Sensors and Home Assistant Integration
 
-## � Screenshots
+- Home Assistant sensor entities for Leneda data.
+- Consolidated Leneda device presentation in Home Assistant.
+- Home Assistant panel for the custom dashboard.
+- Home Assistant entity selection for sensor-based pricing inputs where applicable.
+
+### Billing and Invoice Logic
+
+- Luxembourg-oriented invoice estimation covering supplier, network, taxes, VAT, discounts, and gas costs.
+- Fixed-fee proration across the viewed period.
+- Time-of-use supplier tariff windows.
+- Reference power configuration and reference-power time windows.
+- Exceedance charge calculation from 15-minute load intervals.
+- Reference power level comparison to estimate which configured Creos level is financially optimal for the selected period.
+- Print-friendly invoice layout for paper or PDF export.
+
+### Solar and Self-Consumption Value Tracking
+
+- Solar production overview directly in the invoice.
+- Self-consumption savings based on avoided grid purchases.
+- Feed-in revenue based on exported energy.
+- Per-production-meter feed-in pricing with fixed tariff or Home Assistant sensor mode.
+- Reference-power savings when solar reduces net load enough to avoid exceedance charges.
+- Combined total solar value so the worth of the panels is visible at a glance.
+
+### Settings and Configuration
+
+- Billing configuration directly in the dashboard.
+- Reference power, exceedance rate, and reference-power windows.
+- Supplier and network tariffs.
+- Feed-in pricing per production meter.
+- Per-meter monthly fees.
+- Gas billing configuration.
+- Currency, taxes, levies, and contract discount fields.
+- Standalone credential entry and connection testing.
+
+## Product Views
+
+- `Dashboard`: Main overview, flow view, charts, and top-level KPIs.
+- `Sensors`: Table view of all fetched sensor values.
+- `Invoice`: Electricity and gas invoice estimation, reference-power analysis, solar savings, and print view.
+- `Settings`: Billing setup, feed-in pricing, reference power, meter fees, and standalone credentials.
+
+## Screenshots
 
 | Dashboard | Energy Profile |
 |:-:|:-:|
 | ![Dashboard](screenshots/dashboard.png) | ![Energy Profile Graph](screenshots/energyprofilegraph.png) |
 
-| Invoice Estimate & Exceedance Warning | Cost Settings |
+| Invoice Estimate | Cost Settings |
 |:-:|:-:|
 | ![Invoice Estimate](screenshots/invoiceestimateandexeedancewarning.png) | ![Cost Settings](screenshots/costsettings.png) |
 
----
+## Installation
 
-## �📦 Installation
-### Option 0: No Installation — Use it Online! 🌐
-No Home Assistant? No problem. The dashboard is available as a **hosted web app**:
+### Option 1: HACS
 
-1. Go to **[koosoli.github.io/Leneda-HACS-integration](https://koosoli.github.io/Leneda-HACS-integration/)**.
-2. Browse the dashboard with demo data right away.
-3. To see **your real energy data**, open **Settings** and enter your Leneda API credentials (API Key, Energy ID, and Metering Point IDs).
-4. Your credentials are stored locally in your browser — they are never sent to any third-party server.
-### Option 1: HACS (Recommended)
-1. Open **HACS** in Home Assistant.
-2. Go to **Integrations**.
-3. Click the **⋮ menu** (top right) ➜ **Custom repositories**.
-4. Add this URL: `https://github.com/koosoli/Leneda-HACS-integration`
-5. Category: **Integration**.
-6. Find **Leneda** in the list and click **Download**.
+1. Open `HACS` in Home Assistant.
+2. Go to `Integrations`.
+3. Click the menu in the top-right corner and choose `Custom repositories`.
+4. Add `https://github.com/koosoli/Leneda-integration`.
+5. Select category `Integration`.
+6. Install `Leneda`.
 7. Restart Home Assistant.
 
-### Option 2: Manual
-1. Download the latest release from the [Releases Page](https://github.com/koosoli/Leneda-HACS-integration/releases).
-2. Extract the `custom_components/leneda` folder into your HA `config/custom_components/` directory.
+### Option 2: Manual Home Assistant Installation
+
+1. Download the latest release from the [Releases page](https://github.com/koosoli/Leneda-integration/releases).
+2. Copy `custom_components/leneda` into your Home Assistant `config/custom_components/` directory.
 3. Restart Home Assistant.
 
-### Option 3: Local Dashboard Testing (No `.bat` files)
-Run the dashboard locally without Home Assistant:
+### Option 3: Hosted Demo
 
-Live dev server with hot reload:
-```bash
-cd frontend-src
-npm install
-npm run dev -- --host localhost --port 5175 --strictPort --open
-```
+Explore the dashboard with demo data at:
 
-Standalone local server using the built dashboard:
+[https://koosoli.github.io/Leneda-integration/](https://koosoli.github.io/Leneda-integration/)
+
+### Option 4: Standalone Local Run
+
+Run the dashboard outside Home Assistant:
+
 ```bash
 cd frontend-src
 npm install
@@ -98,32 +133,59 @@ cd ../standalone
 node server.js
 ```
 
-In both cases, open **http://localhost:5175**.  
-For the full standalone guide, see [standalone/README.md](standalone/README.md).
+The standalone guide is available in [standalone/README.md](standalone/README.md).
 
----
+### Option 5: Local Frontend Development
 
-## ⚙️ Configuration
+```bash
+cd frontend-src
+npm install
+npm run dev -- --host localhost --port 5175 --strictPort --open
+```
 
-1. Go to **Settings ➜ Devices & Services**.
-2. Click **+ Add Integration**.
-3. Search for **Leneda**.
-4. Enter your **API Key** and **Metering Point IDs** (found in the Leneda Portal).
-5. (Optional) Set a **Reference Power** entity to track excess usage charges.
+## Home Assistant Setup
 
----
+1. In Home Assistant, go to `Settings -> Devices & Services`.
+2. Click `Add Integration`.
+3. Search for `Leneda`.
+4. Enter your Leneda credentials and metering-point information.
+5. Optionally configure a reference-power source during integration setup.
+6. Open the Leneda dashboard panel and complete billing settings in the `Settings` tab.
 
-## ☕ Support the Project
+## Standalone Setup
 
-If this integration makes your energy management easier (or just looks cool on your wall), consider buying me a coffee!
+In standalone mode, the `Settings` tab is used for:
 
-<a href="https://buymeacoffee.com/koosoli">
-  <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=koosoli&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" />
-</a>
+- Leneda API credentials
+- Energy ID
+- Metering point definitions
+- Billing configuration
 
-Or sponsor me on GitHub: [**github.com/sponsors/koosoli**](https://github.com/sponsors/koosoli)
+The app includes a connection test flow before saving credentials.
 
----
+## Home Assistant vs Standalone
+
+| Capability | Home Assistant | Standalone |
+|---|---|---|
+| Leneda dashboard UI | Yes | Yes |
+| Home Assistant sensors/entities | Yes | No |
+| Sidebar panel | Yes | No |
+| Home Assistant entity picker for sensor-based pricing | Yes | No |
+| Direct Leneda API credential entry in dashboard | No | Yes |
+| Billing configuration | Yes | Yes |
+| Invoice and solar value analysis | Yes | Yes |
+
+## Changelog
+
+Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
+
+## Support
+
+If this project saves you time or helps you understand your energy usage better, support is appreciated:
+
+- Buy me a coffee: [buymeacoffee.com/koosoli](https://buymeacoffee.com/koosoli)
+- GitHub Sponsors: [github.com/sponsors/koosoli](https://github.com/sponsors/koosoli)
 
 ## Credits
-Authored by **[@koosoli](https://github.com/koosoli)**.  
+
+Created and maintained by [@koosoli](https://github.com/koosoli).
