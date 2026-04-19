@@ -243,7 +243,7 @@ var Tt=Object.defineProperty;var Wt=(t,e,a)=>e in t?Tt(t,e,{enumerable:!0,config
     </div>
   `,Q=e!=null&&e.start&&(e!=null&&e.end)?`${se(e.start)} — ${se(e.end)}`:t.range==="custom"&&t.customStart&&t.customEnd?`${se(t.customStart+"T00:00:00")} — ${se(t.customEnd+"T00:00:00")}`:((z=we.find($=>$.id===t.range))==null?void 0:z.label)??"Yesterday",ge=t.chartConsumptionView==="house"?"Total Usage shows the full house load, with the solar-covered share highlighted in green and exports below zero · Scroll to zoom · Drag to pan":"Net Grid focuses on what still came from the grid after solar, with exports shown below zero · The reference limit in kW mode applies here · Scroll to zoom · Drag to pan";return`
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.5.0</div>
+      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.6.0</div>
 
       <!-- Range Selector -->
       <div class="range-selector">

@@ -3,6 +3,19 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.6.0] - 2026-04-19
+
+### New Features
+- **House-Centered Energy Flow:** Reworked the dashboard flow diagram so the house is the central focus, with cleaner source/load placement and an optional gas branch that only appears when a gas meter is configured.
+- **Mobile Flow Diagram:** Added a dedicated mobile layout for the dashboard flow so the diagram now renders on phone-sized screens instead of dropping out.
+
+### Improvements
+- **Chart Readability:** Updated the dashboard charts so positive and negative bars align vertically, daily/monthly/yearly views label periods more clearly, and positive/negative bar corners match the intended flat-at-zero styling from the reference design.
+- **Zoom and Time Resolution:** Improved zoom behavior so deep zooms keep the exact visible sub-day window, allow chart inspection down to 15-minute intervals, and show the corresponding 15-minute timestamps below the bars when zoomed in far enough.
+- **Axis Scaling Polish:** Restored tighter `kWh` scaling so the y-axis tracks the actual visible energy values instead of expanding unnecessarily.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.6.0`.
+
+
 ## [v2.5.0] - 2026-04-17
 
 ### New Features
