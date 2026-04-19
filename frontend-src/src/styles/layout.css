@@ -452,8 +452,17 @@ a:hover {
 .elite-scene {
   position: relative;
   width: 100%;
-  height: 420px;
   z-index: 1;
+}
+
+.elite-scene-desktop {
+  display: block;
+  height: 430px;
+}
+
+.elite-scene-mobile {
+  display: none;
+  height: 500px;
 }
 
 .elite-scene::before {
@@ -489,6 +498,12 @@ a:hover {
   font-weight: 700;
 }
 
+.scene-node-detail {
+  fill: var(--clr-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .house-core-kicker {
   fill: var(--clr-muted);
   font-size: 10px;
@@ -502,10 +517,28 @@ a:hover {
   font-weight: 800;
 }
 
+.house-total-label {
+  fill: var(--clr-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.house-total-value {
+  fill: var(--clr-text);
+  font-size: 18px;
+  font-weight: 800;
+}
+
 /* Elite House Hover Effects */
 .elite-house rect,
 .elite-house path {
   transition: 0.4s var(--ease);
+}
+
+.scene-tier-icon {
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.14));
 }
 
 .flow-halo,
@@ -568,7 +601,7 @@ a:hover {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: var(--sp-3);
   margin-top: var(--sp-5);
 }
@@ -627,6 +660,10 @@ a:hover {
 
 .flow-legend-item.community .flow-legend-dot {
   background: var(--clr-primary);
+}
+
+.flow-legend-item.gas .flow-legend-dot {
+  background: var(--clr-gas);
 }
 
 .mobile-flow-summary {
@@ -735,6 +772,10 @@ a:hover {
 
 .mobile-flow-item.community .mobile-flow-bar span {
   background: linear-gradient(90deg, rgba(88, 166, 255, 0.45), var(--clr-primary));
+}
+
+.mobile-flow-item.gas .mobile-flow-bar span {
+  background: linear-gradient(90deg, rgba(210, 153, 34, 0.4), var(--clr-gas));
 }
 
 /* ── Form layout ───────────────────────────────────────────────── */
@@ -1187,8 +1228,12 @@ a:hover {
     margin-bottom: var(--sp-6);
   }
 
-  .elite-scene {
-    height: 300px;
+  .elite-scene-desktop {
+    height: 360px;
+  }
+
+  .elite-scene-mobile {
+    height: 460px;
   }
 
   .scene-node-label {
@@ -1250,9 +1295,14 @@ a:hover {
     gap: var(--sp-3);
   }
 
-  .elite-scene,
+  .elite-scene-desktop,
   .flow-legend {
     display: none;
+  }
+
+  .elite-scene-mobile {
+    display: block;
+    height: min(500px, 118vw);
   }
 
   .leneda-elite-flow {
@@ -1281,6 +1331,10 @@ a:hover {
 
   .elite-header {
     margin-bottom: var(--sp-5);
+  }
+
+  .elite-scene-mobile {
+    height: min(440px, 124vw);
   }
 
   .flow-legend-item {

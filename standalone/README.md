@@ -32,6 +32,8 @@ node server.js
 
 The dashboard will be available at **http://localhost:5175**.
 
+This server can also act as the `Proxy URL` for the hosted GitHub Pages dashboard, which cannot call `api.leneda.eu` directly from the browser.
+
 ### Live Frontend Dev Server (without `dev-start.bat`)
 Use this if you want hot reload while editing the dashboard:
 
@@ -58,6 +60,8 @@ This also serves the dashboard at **http://localhost:5175** and keeps it off por
 ## Configuration
 
 Credentials and billing settings are stored in `config.json` (created automatically).
+
+When used as a proxy by the hosted GitHub Pages build, the browser can also send credentials and reference-power settings per request, so live hosted sessions do not have to reuse one shared `config.json`.
 
 ## Custom Port
 

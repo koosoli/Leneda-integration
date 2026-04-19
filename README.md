@@ -121,6 +121,9 @@ Explore the dashboard with demo data at:
 
 [https://koosoli.github.io/Leneda-integration/](https://koosoli.github.io/Leneda-integration/)
 
+The hosted page stays on demo data until a `Proxy URL` is configured in `Settings`.
+Once a Leneda-compatible proxy is available, the hosted page can use live data while keeping the entered credentials in the browser and forwarding them to the proxy for each request.
+
 ### Option 4: Standalone Local Run
 
 Run the dashboard outside Home Assistant:
@@ -162,6 +165,8 @@ In standalone mode, the `Settings` tab is used for:
 - Billing configuration
 
 The app includes a connection test flow before saving credentials.
+
+If you want the GitHub Pages build to use live data, run or deploy `standalone/server.js` and enter that server as the `Proxy URL` in the hosted dashboard settings.
 
 ## Home Assistant vs Standalone
 

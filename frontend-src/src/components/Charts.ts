@@ -11,7 +11,7 @@
  * When the visible range changes, an optional onZoomChange callback fires
  * so the app can re-fetch aggregated data for the visible period.
  */
-import { Chart, registerables, type ChartConfiguration } from "chart.js";
+import { Chart, registerables, type ChartConfiguration, type ScriptableContext } from "chart.js";
 import "chartjs-adapter-date-fns";
 import zoomPlugin from "chartjs-plugin-zoom";
 import type { TimeseriesResponse, TimeseriesItem, PerMeterTimeseries } from "../api/leneda";
@@ -45,6 +45,9 @@ export interface ChartOptions {
   onZoomChange?: (start: string, end: string) => void;
   /** Per-meter production data for stacked green-shade chart. */
   perMeterProduction?: PerMeterTimeseries[];
+  /** Keep the chart focused on an exact sub-range after re-rendering. */
+  viewportStartMs?: number;
+  viewportEndMs?: number;
 }
 
 /** A single data point with a real timestamp for time-scale. */
@@ -144,21 +147,67 @@ function localDayKeyToTimestamp(dayKey: string): number {
   return new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
 }
 
-function aggregateFlowBreakdownToDaily(
+function toLocalHourKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hour}`;
+}
+
+function localHourKeyToTimestamp(hourKey: string): number {
+  const [datePart, hourPart] = hourKey.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  return new Date(year, month - 1, day, Number(hourPart), 30, 0, 0).getTime();
+}
+
+function toLocalMonthKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function localMonthKeyToTimestamp(monthKey: string): number {
+  const [year, month] = monthKey.split("-").map(Number);
+  const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+  const next = new Date(year, month, 1, 0, 0, 0, 0);
+  return start.getTime() + Math.round((next.getTime() - start.getTime()) / 2);
+}
+
+type EnergyGranularity = "raw" | "hour" | "day" | "month";
+
+function emptyFlowBucket(): Omit<FlowBreakdownPoint, "x"> {
+  return {
+    y: 0,
+    consumption: 0,
+    production: 0,
+    solarToHome: 0,
+    gridImport: 0,
+    solarExport: 0,
+  };
+}
+
+function aggregateFlowBreakdown(
   points: FlowBreakdownPoint[],
+  granularity: EnergyGranularity,
 ): FlowBreakdownPoint[] {
-  const dayMap = new Map<string, Omit<FlowBreakdownPoint, "x">>();
+  const bucketMap = new Map<string, Omit<FlowBreakdownPoint, "x">>();
+  const getKey = granularity === "hour"
+    ? toLocalHourKey
+    : granularity === "month"
+      ? toLocalMonthKey
+      : toLocalDayKey;
+  const getTimestamp = granularity === "hour"
+    ? localHourKeyToTimestamp
+    : granularity === "month"
+      ? localMonthKeyToTimestamp
+      : localDayKeyToTimestamp;
 
   for (const point of points) {
-    const day = toLocalDayKey(point.x);
-    const existing = dayMap.get(day) ?? {
-      y: 0,
-      consumption: 0,
-      production: 0,
-      solarToHome: 0,
-      gridImport: 0,
-      solarExport: 0,
-    };
+    const key = getKey(point.x);
+    const existing = bucketMap.get(key) ?? emptyFlowBucket();
 
     existing.y += point.y * 0.25;
     existing.consumption += point.consumption * 0.25;
@@ -166,15 +215,28 @@ function aggregateFlowBreakdownToDaily(
     existing.solarToHome += point.solarToHome * 0.25;
     existing.gridImport += point.gridImport * 0.25;
     existing.solarExport += point.solarExport * 0.25;
-    dayMap.set(day, existing);
+    bucketMap.set(key, existing);
   }
 
-  return [...dayMap.entries()]
+  return [...bucketMap.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([day, values]) => ({
-      x: localDayKeyToTimestamp(day),
+    .map(([key, values]) => ({
+      x: getTimestamp(key),
       ...values,
     }));
+}
+
+function getSymmetricAxisBound(value: number): number {
+  if (value <= 0) return 1;
+
+  const step =
+    value <= 3 ? 0.5
+      : value <= 8 ? 1
+        : value <= 20 ? 2
+          : value <= 50 ? 5
+            : 10;
+
+  return Math.ceil(value / step) * step;
 }
 
 /**
@@ -254,17 +316,25 @@ export function renderEnergyChart(
     referencePowerKw,
     onZoomChange,
     consumptionView = "grid",
+    viewportStartMs,
+    viewportEndMs,
   } = options;
-  const totalPoints = Math.max(consumption.items.length, production.items.length);
   const rawPoints = buildRawTimePoints(consumption.items, production.items);
   const rawFlowBreakdown = buildFlowBreakdown(rawPoints.consumption, rawPoints.production);
-  const useDaily = unit === "kwh" && totalPoints > 120;
+  const rawTimestamps = rawFlowBreakdown.map((point) => point.x);
+  const rawSpanMs = rawTimestamps.length > 1 ? Math.max(...rawTimestamps) - Math.min(...rawTimestamps) : 0;
+  const rawSpanDays = rawSpanMs / 86_400_000;
+  const energyGranularity: EnergyGranularity =
+    rawSpanDays <= 1 ? "raw"
+      : rawSpanDays <= 2 ? "hour"
+        : rawSpanDays > 62 ? "month"
+          : "day";
   const flowBreakdown =
     unit === "kw"
       ? rawFlowBreakdown
-      : useDaily
-        ? aggregateFlowBreakdownToDaily(rawFlowBreakdown)
-        : scaleFlowBreakdown(rawFlowBreakdown, 0.25);
+      : energyGranularity === "raw"
+        ? scaleFlowBreakdown(rawFlowBreakdown, 0.25)
+        : aggregateFlowBreakdown(rawFlowBreakdown, energyGranularity);
   const yLabel = unit === "kwh" ? "kWh" : "kW";
 
   const ctx = canvas.getContext("2d");
@@ -293,6 +363,17 @@ export function renderEnergyChart(
   const isGridView = consumptionView === "grid";
   const showRefLine = unit === "kw" && referencePowerKw > 0 && isGridView;
   const hasSolarExport = solarExportPoints.some((point) => point.y > 0.0001);
+  const maxPositiveValue = Math.max(
+    showRefLine ? referencePowerKw : 0,
+    ...consumptionPoints.map((point) => point.y),
+    ...gridImportPoints.map((point) => point.y),
+    ...solarToHomePoints.map((point) => point.y),
+    0,
+  );
+  const maxNegativeValue = Math.max(...solarExportPoints.map((point) => point.y), 0);
+  const symmetricAxisBound = hasSolarExport
+    ? getSymmetricAxisBound(Math.max(maxPositiveValue, maxNegativeValue))
+    : undefined;
 
   // Remaining grid draw is what matters for reference-power exceedance.
   const gridImportColors = gridImportPoints.map((p) =>
@@ -308,8 +389,48 @@ export function renderEnergyChart(
   const timestamps = flowBreakdown.map((p) => p.x);
   const spanMs = timestamps.length > 1 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
   const spanDays = spanMs / 86_400_000;
-  const timeUnit = useDaily || spanDays > 2 ? "day" : "hour";
+  const timeUnit = unit === "kwh"
+    ? energyGranularity === "month"
+      ? "month"
+      : energyGranularity === "day"
+        ? "day"
+        : energyGranularity === "hour"
+          ? "hour"
+          : "minute"
+    : rawSpanDays > 2 ? "day" : "hour";
   const barPercentage = spanDays > 7 ? 0.85 : 0.65;
+  const showEveryPeriodTick = timestamps.length > 1 && timestamps.length <= (timeUnit === "minute" ? 40 : 35);
+  const useDataTicks =
+    unit === "kwh" ||
+    timeUnit === "day" ||
+    timeUnit === "month";
+  const energyBarRadius = unit === "kwh" ? 4 : 2;
+  const energyBalanceStack = "energy-balance";
+  const roundedTopCorners = {
+    topLeft: energyBarRadius,
+    topRight: energyBarRadius,
+    bottomLeft: 0,
+    bottomRight: 0,
+  };
+  const roundedBottomCorners = {
+    topLeft: 0,
+    topRight: 0,
+    bottomLeft: energyBarRadius,
+    bottomRight: energyBarRadius,
+  };
+  const positiveBarRadius = (ctx: ScriptableContext<"bar">) => {
+    const raw = ctx.raw as TimePoint | undefined;
+    return (raw?.y ?? 0) > 0 ? roundedTopCorners : 0;
+  };
+  const solarStackBarRadius = (ctx: ScriptableContext<"bar">) => {
+    const raw = ctx.raw as TimePoint | undefined;
+    if ((raw?.y ?? 0) <= 0) return 0;
+    return (gridImportPoints[ctx.dataIndex]?.y ?? 0) > 0 ? 0 : roundedTopCorners;
+  };
+  const negativeBarRadius = (ctx: ScriptableContext<"bar">) => {
+    const raw = ctx.raw as TimePoint | undefined;
+    return (raw?.y ?? 0) < 0 ? roundedBottomCorners : 0;
+  };
   const datasets = isGridView
     ? [
       {
@@ -318,9 +439,12 @@ export function renderEnergyChart(
         backgroundColor: "rgba(63, 185, 80, 0.70)",
         borderColor: "#3fb950",
         borderWidth: 1,
-        borderRadius: unit === "kwh" ? 4 : 2,
+        borderRadius: solarStackBarRadius,
+        borderSkipped: false,
         barPercentage,
-        stack: "house-usage",
+        grouped: false,
+        stack: energyBalanceStack,
+        order: 1,
       },
       {
         label: `From Grid (${yLabel})`,
@@ -328,9 +452,12 @@ export function renderEnergyChart(
         backgroundColor: gridImportColors,
         borderColor: gridImportBorderColors,
         borderWidth: 1,
-        borderRadius: unit === "kwh" ? 4 : 2,
+        borderRadius: positiveBarRadius,
+        borderSkipped: false,
         barPercentage,
-        stack: "house-usage",
+        grouped: false,
+        stack: energyBalanceStack,
+        order: 2,
       },
       ...(hasSolarExport
         ? [{
@@ -339,9 +466,12 @@ export function renderEnergyChart(
           backgroundColor: "rgba(88, 166, 255, 0.60)",
           borderColor: "#58a6ff",
           borderWidth: 1,
-          borderRadius: unit === "kwh" ? 4 : 2,
+          borderRadius: negativeBarRadius,
+          borderSkipped: false,
           barPercentage,
-          stack: "solar-export",
+          grouped: false,
+          stack: energyBalanceStack,
+          order: 3,
         }]
         : []),
     ]
@@ -352,7 +482,8 @@ export function renderEnergyChart(
         backgroundColor: "rgba(248, 81, 73, 0.45)",
         borderColor: "#f85149",
         borderWidth: 1,
-        borderRadius: unit === "kwh" ? 4 : 2,
+        borderRadius: positiveBarRadius,
+        borderSkipped: false,
         barPercentage,
         grouped: false,
         order: 1,
@@ -363,7 +494,8 @@ export function renderEnergyChart(
         backgroundColor: "rgba(63, 185, 80, 0.85)",
         borderColor: "#3fb950",
         borderWidth: 1,
-        borderRadius: unit === "kwh" ? 4 : 2,
+        borderRadius: positiveBarRadius,
+        borderSkipped: false,
         barPercentage: Math.max(0.42, barPercentage - 0.14),
         grouped: false,
         order: 2,
@@ -375,8 +507,9 @@ export function renderEnergyChart(
           backgroundColor: "rgba(88, 166, 255, 0.60)",
           borderColor: "#58a6ff",
           borderWidth: 1,
-          borderRadius: unit === "kwh" ? 4 : 2,
-          barPercentage: Math.min(0.95, barPercentage + 0.1),
+          borderRadius: negativeBarRadius,
+          borderSkipped: false,
+          barPercentage,
           grouped: false,
           stack: "solar-export",
           order: 3,
@@ -442,9 +575,11 @@ export function renderEnergyChart(
               if (!items.length) return "";
               const raw = items[0].raw as TimePoint;
               const d = new Date(raw.x);
-              return spanDays > 2
-                ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
-                : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+              return timeUnit === "month"
+                ? d.toLocaleDateString(undefined, { month: "long", year: "numeric" })
+                : timeUnit === "day"
+                  ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                  : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
             },
             label(tooltipCtx) {
               const rawValue = tooltipCtx.parsed.y ?? 0;
@@ -519,6 +654,7 @@ export function renderEnergyChart(
             x: {
               min: timestamps.length ? Math.min(...timestamps) - 3_600_000 : undefined,
               max: timestamps.length ? Math.max(...timestamps) + 3_600_000 : undefined,
+              minRange: 15 * 60 * 1000,
             },
           },
         },
@@ -526,19 +662,64 @@ export function renderEnergyChart(
       scales: {
         x: {
           type: "time",
+          bounds: useDataTicks ? "data" : "ticks",
+          min: Number.isFinite(viewportStartMs) ? viewportStartMs : undefined,
+          max: Number.isFinite(viewportEndMs) ? viewportEndMs : undefined,
           time: {
             unit: timeUnit,
             displayFormats: {
+              minute: "HH:mm",
               hour: "HH:mm",
               day: "MMM d",
+              month: "MMM yyyy",
             },
             tooltipFormat: "PPp",
           },
           ticks: {
             color: clrMuted,
-            maxTicksLimit: 14,
-            font: { size: 10 },
-            maxRotation: 45,
+            source: useDataTicks ? "data" : "auto",
+            autoSkip: !showEveryPeriodTick,
+            maxTicksLimit: showEveryPeriodTick ? undefined : 14,
+            font: { size: showEveryPeriodTick ? (timeUnit === "minute" ? 8 : 9) : 10 },
+            minRotation: showEveryPeriodTick ? 0 : undefined,
+            maxRotation: showEveryPeriodTick ? 0 : 45,
+            callback(value, index) {
+              const date = new Date(Number(value));
+              if (Number.isNaN(date.getTime())) return "";
+
+              if (!showEveryPeriodTick) {
+                return timeUnit === "month"
+                  ? date.toLocaleDateString(undefined, { month: "short", year: "numeric" })
+                  : timeUnit === "hour" || timeUnit === "minute"
+                  ? date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+                  : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+              }
+
+              if (timeUnit === "month") {
+                const monthLabel = date.toLocaleDateString(undefined, { month: "short" });
+                const yearLabel = String(date.getFullYear());
+                return index === 0 || date.getMonth() === 0
+                  ? [monthLabel, yearLabel]
+                  : monthLabel;
+              }
+
+              if (timeUnit === "hour" || timeUnit === "minute") {
+                const timeLabel = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+                const dayLabel = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+                const isDayBoundary = timeUnit === "minute"
+                  ? date.getHours() === 0 && date.getMinutes() === 0
+                  : date.getHours() === 0;
+                return index === 0 || isDayBoundary
+                  ? [dayLabel, timeLabel]
+                  : timeLabel;
+              }
+
+              const dayLabel = String(date.getDate());
+              const monthLabel = date.toLocaleDateString(undefined, { month: "short" });
+              return index === 0 || date.getDate() === 1
+                ? [monthLabel, dayLabel]
+                : dayLabel;
+            },
           },
           grid: { color: clrBorder },
           // offset: true keeps bars centred on their time tick
@@ -546,7 +727,9 @@ export function renderEnergyChart(
           stacked: isGridView,
         },
         y: {
-          beginAtZero: true,
+          beginAtZero: !symmetricAxisBound,
+          min: symmetricAxisBound ? -symmetricAxisBound : undefined,
+          max: symmetricAxisBound ? symmetricAxisBound : undefined,
           stacked: isGridView,
           ticks: {
             color: clrMuted,

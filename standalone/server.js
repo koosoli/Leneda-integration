@@ -35,6 +35,13 @@ const ALLOWED_CORS_ORIGINS = (process.env.CORS_ALLOW_ORIGINS || DEFAULT_ALLOWED_
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const ALLOWED_CORS_HEADERS = [
+  "Content-Type",
+  "X-Leneda-Api-Key",
+  "X-Leneda-Energy-Id",
+  "X-Leneda-Meters",
+  "X-Leneda-Reference-Config",
+];
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -73,6 +80,33 @@ const DEFAULT_BILLING = {
   currency: "EUR",
 };
 
+function normalizeMeters(meters) {
+  return (Array.isArray(meters) ? meters : [])
+    .map((meter) => ({
+      id: String(meter?.id || "").trim(),
+      types: Array.isArray(meter?.types)
+        ? meter.types.map((type) => String(type || "").trim()).filter(Boolean)
+        : ["consumption"],
+    }))
+    .filter((meter) => meter.id);
+}
+
+function readHeader(req, name) {
+  const value = req.headers[name];
+  if (Array.isArray(value)) return String(value[0] || "");
+  return String(value || "");
+}
+
+function readJsonHeader(req, name) {
+  const raw = readHeader(req, name).trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
@@ -106,13 +140,52 @@ function getBillingConfig(config) {
   };
 }
 
+function getEffectiveBillingConfig(req, config) {
+  const billing = getBillingConfig(config);
+  const referenceOverride = readJsonHeader(req, "x-leneda-reference-config");
+  if (!referenceOverride || typeof referenceOverride !== "object") {
+    return billing;
+  }
+
+  const merged = { ...billing };
+  const referencePowerKw = Number(referenceOverride.reference_power_kw);
+  if (Number.isFinite(referencePowerKw)) {
+    merged.reference_power_kw = referencePowerKw;
+  }
+  if (Array.isArray(referenceOverride.reference_power_windows)) {
+    merged.reference_power_windows = referenceOverride.reference_power_windows;
+  }
+  return merged;
+}
+
+function getEffectiveCredentials(req, fallbackCreds = {}) {
+  const apiKey = readHeader(req, "x-leneda-api-key").trim();
+  const energyId = readHeader(req, "x-leneda-energy-id").trim();
+  const metersHeader = readJsonHeader(req, "x-leneda-meters");
+  const hasOverrides = !!apiKey || !!energyId || metersHeader !== null;
+
+  if (hasOverrides) {
+    return {
+      api_key: apiKey && !apiKey.startsWith("\u2022") ? apiKey : "",
+      energy_id: energyId,
+      meters: normalizeMeters(metersHeader),
+    };
+  }
+
+  return {
+    api_key: String(fallbackCreds.api_key || "").trim(),
+    energy_id: String(fallbackCreds.energy_id || "").trim(),
+    meters: normalizeMeters(fallbackCreds.meters),
+  };
+}
+
 function isConfigured(creds) {
-  const meters = creds.meters || [];
+  const meters = normalizeMeters(creds.meters);
   return !!(creds.api_key && creds.energy_id && meters.length > 0 && meters[0].id);
 }
 
 function metersOfType(creds, meterType) {
-  return (creds.meters || [])
+  return normalizeMeters(creds.meters)
     .filter((meter) => Array.isArray(meter.types) && meter.types.includes(meterType))
     .map((meter) => String(meter.id || "").trim())
     .filter(Boolean);
@@ -363,8 +436,7 @@ async function computePeakAndExceedance(billingConfig, creds, startIso, endIso) 
   };
 }
 
-async function fetchLiveAggregatedData(config, creds, startDate, endDate) {
-  const billingConfig = getBillingConfig(config);
+async function fetchLiveAggregatedData(billingConfig, creds, startDate, endDate) {
   const aggregationLevel = (new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) > (35 * 24 * 60 * 60 * 1000)
     ? "Month"
     : "Infinite";
@@ -420,14 +492,15 @@ function applyCors(req, res) {
   }
   res.setHeader("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", ALLOWED_CORS_HEADERS.join(", "));
   return allowedOrigin;
 }
 
 async function handleApi(req, res, urlPath, searchParams) {
   const config = loadConfig();
-  const creds = config.credentials || {};
-  const meters = creds.meters || [];
+  const creds = getEffectiveCredentials(req, config.credentials || {});
+  const billingConfig = getEffectiveBillingConfig(req, config);
+  const meters = normalizeMeters(creds.meters);
 
   if (urlPath === "/leneda_api/mode" && req.method === "GET") {
     return jsonResp(res, { mode: "standalone", configured: isConfigured(creds) });
@@ -451,7 +524,7 @@ async function handleApi(req, res, urlPath, searchParams) {
       config.credentials.energy_id = body.energy_id;
     }
     if (body.meters !== undefined) {
-      config.credentials.meters = body.meters;
+      config.credentials.meters = normalizeMeters(body.meters);
     }
     delete config.credentials.metering_point;
     saveConfig(config);
@@ -463,7 +536,7 @@ async function handleApi(req, res, urlPath, searchParams) {
     const testCreds = {
       api_key: body.api_key && !String(body.api_key).startsWith("\u2022") ? body.api_key : creds.api_key,
       energy_id: body.energy_id || creds.energy_id,
-      meters: body.meters || meters,
+      meters: body.meters ? normalizeMeters(body.meters) : meters,
     };
     const firstMeterId = testCreds.meters?.[0]?.id;
 
@@ -494,7 +567,7 @@ async function handleApi(req, res, urlPath, searchParams) {
   if (urlPath === "/leneda_api/config" && req.method === "GET") {
     const hasGas = meters.some((meter) => Array.isArray(meter.types) && meter.types.includes("gas"));
     return jsonResp(res, {
-      ...getBillingConfig(config),
+      ...billingConfig,
       meters: meters.map((meter) => ({ id: meter.id || "", types: meter.types || ["consumption"] })),
       meter_has_gas: hasGas,
     });
@@ -524,7 +597,7 @@ async function handleApi(req, res, urlPath, searchParams) {
     const range = searchParams.get("range") || "yesterday";
     const { start, end } = dateRangeFor(range);
     try {
-      const liveData = await fetchLiveAggregatedData(config, creds, start, end);
+      const liveData = await fetchLiveAggregatedData(billingConfig, creds, start, end);
       return jsonResp(res, {
         range,
         metering_point: meterForObis("1-1:1.29.0", creds),
@@ -547,7 +620,7 @@ async function handleApi(req, res, urlPath, searchParams) {
     }
 
     try {
-      const liveData = await fetchLiveAggregatedData(config, creds, start, end);
+      const liveData = await fetchLiveAggregatedData(billingConfig, creds, start, end);
       return jsonResp(res, {
         start,
         end,
@@ -725,7 +798,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   const config = loadConfig();
   const creds = config.credentials || {};
-  const meters = creds.meters || [];
+  const meters = normalizeMeters(creds.meters);
 
   console.log("");
   console.log("Leneda Energy Dashboard (Standalone)");

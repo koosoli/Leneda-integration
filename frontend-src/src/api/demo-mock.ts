@@ -83,6 +83,35 @@ function hasProxyUrl(): boolean {
   return getProxyUrl().length > 0;
 }
 
+function buildProxyHeaders(init?: HeadersInit): Headers {
+  const headers = new Headers(init);
+  const creds = loadCreds();
+
+  if (
+    creds &&
+    creds.api_key &&
+    !creds.api_key.startsWith("\u2022") &&
+    creds.energy_id &&
+    Array.isArray(creds.meters) &&
+    creds.meters.length > 0
+  ) {
+    headers.set("X-Leneda-Api-Key", creds.api_key);
+    headers.set("X-Leneda-Energy-Id", creds.energy_id);
+    headers.set("X-Leneda-Meters", JSON.stringify(creds.meters));
+  }
+
+  const billing = loadBilling();
+  headers.set(
+    "X-Leneda-Reference-Config",
+    JSON.stringify({
+      reference_power_kw: billing.reference_power_kw,
+      reference_power_windows: billing.reference_power_windows ?? [],
+    }),
+  );
+
+  return headers;
+}
+
 async function proxyFetch<T>(path: string, init?: RequestInit, proxyUrlOverride?: string): Promise<T> {
   const baseUrl = normalizeProxyUrl(proxyUrlOverride) || getProxyUrl();
   if (!baseUrl) {
@@ -94,9 +123,7 @@ async function proxyFetch<T>(path: string, init?: RequestInit, proxyUrlOverride?
     response = await fetch(`${baseUrl}${path}`, {
       ...init,
       credentials: "omit",
-      headers: {
-        ...(init?.headers as Record<string, string> | undefined),
-      },
+      headers: buildProxyHeaders(init?.headers),
     });
   } catch {
     throw new Error(`Could not reach proxy at ${baseUrl}`);
@@ -258,16 +285,6 @@ export const demo = {
   },
 
   async fetchCredentials(): Promise<Credentials> {
-    const proxyUrl = getProxyUrl();
-    if (proxyUrl) {
-      try {
-        const remote = await proxyFetch<Credentials>("/leneda_api/credentials");
-        return { ...remote, proxy_url: proxyUrl };
-      } catch {
-        // Fall back to local draft values if the proxy is offline.
-      }
-    }
-
     const creds = loadCreds();
     if (creds) {
       return {
@@ -295,18 +312,6 @@ export const demo = {
       proxy_url: normalizeProxyUrl(creds.proxy_url ?? prev.proxy_url),
     };
     saveCreds(updated);
-
-    if (updated.proxy_url) {
-      await proxyFetch<{ status: string }>("/leneda_api/credentials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_key: updated.api_key,
-          energy_id: updated.energy_id,
-          meters: updated.meters,
-        }),
-      });
-    }
   },
 
   async testCredentials(creds: Credentials): Promise<{ success: boolean; message: string }> {
@@ -339,10 +344,6 @@ export const demo = {
   },
 
   async fetchConfig(): Promise<BillingConfig> {
-    if (hasProxyUrl()) {
-      return proxyFetch<BillingConfig>("/leneda_api/config");
-    }
-
     const config = loadBilling();
     if (hasRealCreds()) {
       const creds = loadCreds()!;
@@ -356,23 +357,11 @@ export const demo = {
   },
 
   async saveConfig(partial: Partial<BillingConfig> | Record<string, any>): Promise<void> {
-    if (hasProxyUrl()) {
-      await proxyFetch<{ status: string }>("/leneda_api/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(partial),
-      });
-      return;
-    }
     const current = loadBilling();
     saveBillingToStorage({ ...current, ...partial } as BillingConfig);
   },
 
   async resetConfig(): Promise<void> {
-    if (hasProxyUrl()) {
-      await proxyFetch<{ status: string }>("/leneda_api/config/reset", { method: "POST" });
-      return;
-    }
     saveBillingToStorage(defaultBilling());
   },
 

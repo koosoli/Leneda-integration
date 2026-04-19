@@ -77,6 +77,8 @@ export interface AppState {
   range: TimeRange;
   customStart: string;
   customEnd: string;
+  chartViewportStart: string | null;
+  chartViewportEnd: string | null;
   chartUnit: "kw" | "kwh";
   chartConsumptionView: "house" | "grid";
   analysisHeatmapMetric: "house" | "grid" | "solar";
@@ -191,6 +193,8 @@ export class LenedaApp {
     range: "yesterday",
     customStart: "",
     customEnd: "",
+    chartViewportStart: null,
+    chartViewportEnd: null,
     chartUnit: "kwh",
     chartConsumptionView: "grid",
     analysisHeatmapMetric: "grid",
@@ -283,6 +287,7 @@ export class LenedaApp {
     this.state.rangeData = null;
     this.state.consumptionTimeseries = null;
     this.state.productionTimeseries = null;
+    this.clearChartViewport();
     this.state.analysisComparison = null;
     this.state.analysisComparisonLoading = false;
     this.state.error = this.toDisplayError(error, fallback);
@@ -291,6 +296,11 @@ export class LenedaApp {
   private resetAnalysisComparison(): void {
     this.state.analysisComparison = null;
     this.state.analysisComparisonLoading = false;
+  }
+
+  private clearChartViewport(): void {
+    this.state.chartViewportStart = null;
+    this.state.chartViewportEnd = null;
   }
 
   private getCurrentRangeKey(): string {
@@ -364,6 +374,7 @@ export class LenedaApp {
     this.state.loading = true;
     this.state.error = null;
     this.state.rangeData = null; // Clear stale data before fetching
+    this.clearChartViewport();
     this.resetAnalysisComparison();
     this.render();
 
@@ -396,6 +407,7 @@ export class LenedaApp {
 
   private async changeRange(range: TimeRange): Promise<void> {
     this.preZoomRange = null;
+    this.clearChartViewport();
     this.state.range = range;
     this.resetAnalysisComparison();
 
@@ -440,6 +452,7 @@ export class LenedaApp {
 
   private async applyCustomRange(): Promise<void> {
     this.preZoomRange = null;
+    this.clearChartViewport();
     const { customStart, customEnd } = this.state;
     if (!customStart || !customEnd) return;
 
@@ -766,6 +779,7 @@ export class LenedaApp {
       const { resetChartZoom } = await import("./Charts");
       resetChartZoom();
       (resetZoomBtn as HTMLElement).style.display = "none";
+      this.clearChartViewport();
 
       if (this.preZoomRange !== null) {
         const origRange = this.preZoomRange;
@@ -1175,15 +1189,24 @@ export class LenedaApp {
     try {
       const { renderEnergyChart } = await import("./Charts");
       const { fetchTimeseries, fetchPerMeterTimeseries } = await import("../api/leneda");
-
-      // Compute date range for the currently selected period
       const { start, end } = this.getDateRangeISO();
+      const viewportStartMs = this.state.chartViewportStart
+        ? new Date(this.state.chartViewportStart).getTime()
+        : undefined;
+      const viewportEndMs = this.state.chartViewportEnd
+        ? new Date(this.state.chartViewportEnd).getTime()
+        : undefined;
 
-      // Fetch consumption + production timeseries for that range
-      const [consumption, production] = await Promise.all([
-        fetchTimeseries("1-1:1.29.0", start, end),
-        fetchTimeseries("1-1:2.29.0", start, end),
-      ]);
+      let consumption = this.state.consumptionTimeseries;
+      let production = this.state.productionTimeseries;
+      if (!consumption || !production) {
+        [consumption, production] = await Promise.all([
+          fetchTimeseries("1-1:1.29.0", start, end),
+          fetchTimeseries("1-1:2.29.0", start, end),
+        ]);
+        this.state.consumptionTimeseries = consumption;
+        this.state.productionTimeseries = production;
+      }
 
       const referencePowerKw = this.state.config?.reference_power_kw ?? 0;
 
@@ -1208,6 +1231,8 @@ export class LenedaApp {
         consumptionView: this.state.chartConsumptionView,
         referencePowerKw,
         perMeterProduction,
+        viewportStartMs,
+        viewportEndMs,
         onZoomChange: (zoomStart: string, zoomEnd: string) => {
           this.handleChartZoomChange(zoomStart, zoomEnd);
         },
@@ -1236,24 +1261,18 @@ export class LenedaApp {
       const startDate = start.slice(0, 10);
       const endDate = end.slice(0, 10);
       this.resetAnalysisComparison();
-      const data = await fetchCustomData(startDate, endDate);
+      const data = await fetchCustomData(start, end);
       const [consumptionTimeseries, productionTimeseries] = await Promise.all([
-        fetchTimeseries(
-          "1-1:1.29.0",
-          new Date(startDate + "T00:00:00").toISOString(),
-          new Date(endDate + "T23:59:59.999").toISOString(),
-        ),
-        fetchTimeseries(
-          "1-1:2.29.0",
-          new Date(startDate + "T00:00:00").toISOString(),
-          new Date(endDate + "T23:59:59.999").toISOString(),
-        ),
+        fetchTimeseries("1-1:1.29.0", start, end),
+        fetchTimeseries("1-1:2.29.0", start, end),
       ]);
 
-      // Switch to custom range with the zoomed period
+      // Keep the date picker values stable, but preserve the exact chart viewport separately.
       this.state.range = "custom";
       this.state.customStart = startDate;
       this.state.customEnd = endDate;
+      this.state.chartViewportStart = start;
+      this.state.chartViewportEnd = end;
       this.state.rangeData = {
         range: "custom",
         consumption: data.consumption,
@@ -1276,8 +1295,8 @@ export class LenedaApp {
       this.state.consumptionTimeseries = consumptionTimeseries;
       this.state.productionTimeseries = productionTimeseries;
 
-      // Partial DOM update — everything except the chart canvas
-      this.renderDashboardPartial();
+      // Full re-render so the chart can rebuild with a finer aggregation for the zoomed period.
+      this.renderPreserveMainScroll();
     } catch (e) {
       console.error("Zoom data fetch failed:", e);
       this.clearRangeStateWithError(e, "Missing data");
@@ -1286,94 +1305,16 @@ export class LenedaApp {
   }
 
   /**
-   * Partial dashboard re-render: updates range selector, date picker,
-   * stat cards, flow diagram, key metrics, and chart title — but
-   * leaves the chart canvas untouched so zoom/pan state is preserved.
-   * Also re-attaches event listeners for the replaced DOM elements.
-   */
-  private renderDashboardPartial(): void {
-    const dashboard = this.root.querySelector(".dashboard");
-    if (!dashboard || !this.state.rangeData) return;
-
-    // Render the full dashboard to a temp element, then cherry-pick sections
-    const temp = document.createElement("div");
-    temp.innerHTML = renderDashboard(this.state);
-    const src = temp.querySelector(".dashboard");
-    if (!src) return;
-
-    // 1. Range selector — highlight "Custom" as active
-    const oldRange = dashboard.querySelector(".range-selector");
-    const newRange = src.querySelector(".range-selector");
-    if (oldRange && newRange) oldRange.replaceWith(newRange);
-
-    // 2. Range info bar and custom date picker
-    const oldRangeInfo = dashboard.querySelector(".range-info-bar");
-    const newRangeInfo = src.querySelector(".range-info-bar");
-    if (oldRangeInfo && newRangeInfo) {
-      oldRangeInfo.replaceWith(newRangeInfo);
-    } else if (!oldRangeInfo && newRangeInfo) {
-      dashboard.querySelector(".range-selector")?.insertAdjacentElement("afterend", newRangeInfo);
-    } else if (oldRangeInfo && !newRangeInfo) {
-      oldRangeInfo.remove();
-    }
-
-    // 3. Custom date picker — show the zoomed dates
-    const oldPicker = dashboard.querySelector(".custom-range-picker");
-    const newPicker = src.querySelector(".custom-range-picker");
-    if (oldPicker && newPicker) {
-      oldPicker.replaceWith(newPicker);
-    } else if (!oldPicker && newPicker) {
-      const anchor = dashboard.querySelector(".range-info-bar") ?? dashboard.querySelector(".range-selector");
-      anchor?.insertAdjacentElement("afterend", newPicker);
-    } else if (oldPicker && !newPicker) {
-      oldPicker.remove();
-    }
-
-    // 4. Stat cards
-    const oldStats = dashboard.querySelector(".stats-grid");
-    const newStats = src.querySelector(".stats-grid");
-    if (oldStats && newStats) oldStats.replaceWith(newStats);
-
-    // 5. Flow diagram + key metrics
-    const oldFlow = dashboard.querySelector(".flow-card");
-    const newFlow = src.querySelector(".flow-card");
-    if (oldFlow && newFlow) oldFlow.replaceWith(newFlow);
-
-    const oldMetrics = dashboard.querySelector(".metrics-card");
-    const newMetrics = src.querySelector(".metrics-card");
-    if (oldMetrics && newMetrics) oldMetrics.replaceWith(newMetrics);
-
-    // 6. Chart title (shows the zoomed date range)
-    const oldTitle = dashboard.querySelector(".chart-header .card-title");
-    const newTitle = src.querySelector(".chart-header .card-title");
-    if (oldTitle && newTitle) oldTitle.replaceWith(newTitle);
-
-    // Show reset-zoom button
-    const resetBtn = dashboard.querySelector(".reset-zoom-btn") as HTMLElement | null;
-    if (resetBtn) resetBtn.style.display = "";
-
-    // Re-attach event listeners for replaced elements
-    dashboard.querySelectorAll("[data-range]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        this.changeRange((btn as HTMLElement).dataset.range as TimeRange);
-      });
-    });
-
-    const startInput = dashboard.querySelector("#custom-start") as HTMLInputElement | null;
-    const endInput = dashboard.querySelector("#custom-end") as HTMLInputElement | null;
-    if (startInput) startInput.addEventListener("change", () => { this.state.customStart = startInput.value; });
-    if (endInput) endInput.addEventListener("change", () => { this.state.customEnd = endInput.value; });
-
-    dashboard.querySelector("#apply-custom-range")?.addEventListener("click", () => {
-      this.preZoomRange = null; // User is now manually using custom range
-      this.applyCustomRange();
-    });
-  }
-
-  /**
    * Compute ISO start/end date strings for the currently selected range.
    */
   private getDateRangeISO(): { start: string; end: string } {
+    if (this.state.chartViewportStart && this.state.chartViewportEnd) {
+      return {
+        start: this.state.chartViewportStart,
+        end: this.state.chartViewportEnd,
+      };
+    }
+
     const now = new Date();
     const fmt = (d: Date) => d.toISOString();
 
