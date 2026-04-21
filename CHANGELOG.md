@@ -3,6 +3,16 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.7.0] - 2026-04-21
+
+### New Features
+- **Self-Use vs Export Value:** Added a dedicated solar metric that shows how much more or less self-consumed PV was worth compared with selling the same energy back to the grid.
+
+### Improvements
+- **Feed-in Row kWh Display:** Added exported `kWh` alongside each feed-in revenue row so multi-system invoices show the energy allocation and tariff together at a glance.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.7.0`.
+
+
 ## [v2.6.0] - 2026-04-19
 
 ### New Features

@@ -1,0 +1,102 @@
+{
+  "credentials": {
+    "api_key": "d91dbc4e-2e19-4bbe-a867-d48ef1ad1bc9",
+    "energy_id": "LUXE-OL-KO-F1QNY",
+    "meters": [
+      {
+        "id": "LU0000010983800000000000070056600",
+        "types": [
+          "consumption"
+        ]
+      },
+      {
+        "id": "LU0000010983800000000000070590176",
+        "types": [
+          "consumption"
+        ]
+      },
+      {
+        "id": "LU0000010983800000000000770590176",
+        "types": [
+          "production"
+        ]
+      },
+      {
+        "id": "LU0000010983800000000000070578580",
+        "types": [
+          "consumption"
+        ]
+      },
+      {
+        "id": "LU0000010983800000000000770578580",
+        "types": [
+          "production"
+        ]
+      }
+    ]
+  },
+  "billing": {
+    "energy_fixed_fee": 3.5,
+    "energy_variable_rate": 0.1125,
+    "network_metering_rate": 5.72,
+    "network_power_ref_rate": 19.61,
+    "network_variable_rate": 0.051,
+    "reference_power_kw": 12,
+    "reference_power_windows": [],
+    "exceedance_rate": 0.0765,
+    "feed_in_tariff": 0.08,
+    "consumption_rate_windows": [],
+    "feed_in_rates": [
+      {
+        "meter_id": "LU0000010983800000000000770590176",
+        "mode": "fixed",
+        "tariff": 0.08,
+        "sensor_entity": ""
+      },
+      {
+        "meter_id": "LU0000010983800000000000770578580",
+        "mode": "fixed",
+        "tariff": 0.1456,
+        "sensor_entity": ""
+      }
+    ],
+    "gas_fixed_fee": 6.5,
+    "gas_variable_rate": 0.055,
+    "gas_network_fee": 4.8,
+    "gas_network_variable_rate": 0.012,
+    "gas_tax_rate": 0.001,
+    "gas_vat_rate": 0.08,
+    "compensation_fund_rate": -0.001,
+    "electricity_tax_rate": 0.001,
+    "connect_discount": 0.5,
+    "vat_rate": 0.08,
+    "currency": "EUR",
+    "meter_monthly_fees": [
+      {
+        "meter_id": "LU0000010983800000000000070056600",
+        "label": "Meter 1 metering fee",
+        "fee": 0
+      },
+      {
+        "meter_id": "LU0000010983800000000000070590176",
+        "label": "Meter 2 metering fee",
+        "fee": 0
+      },
+      {
+        "meter_id": "LU0000010983800000000000770590176",
+        "label": "Meter 3 metering fee",
+        "fee": 0
+      },
+      {
+        "meter_id": "LU0000010983800000000000070578580",
+        "label": "Meter 4 metering fee",
+        "fee": 0
+      },
+      {
+        "meter_id": "LU0000010983800000000000770578580",
+        "label": "Meter 5 metering fee",
+        "fee": 0
+      }
+    ]
+  }
+}

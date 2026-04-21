@@ -716,6 +716,14 @@ async function handleApi(req, res, urlPath, searchParams) {
 
 function serveStatic(req, res) {
   let filePath = (req.url || "/").split("?")[0];
+  const standaloneStaticPrefix = "/leneda-panel/static";
+
+  if (filePath === standaloneStaticPrefix) {
+    filePath = "/index.html";
+  } else if (filePath.startsWith(`${standaloneStaticPrefix}/`)) {
+    filePath = filePath.slice(standaloneStaticPrefix.length);
+  }
+
   if (filePath === "/" || filePath === "") filePath = "/index.html";
 
   const fullPath = path.join(FRONTEND_DIR, filePath);
@@ -726,6 +734,12 @@ function serveStatic(req, res) {
   }
 
   if (!fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) {
+    if (path.extname(filePath)) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+
     const indexPath = path.join(FRONTEND_DIR, "index.html");
     if (fs.existsSync(indexPath)) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");

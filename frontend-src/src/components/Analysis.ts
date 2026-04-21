@@ -48,6 +48,7 @@ interface DailyBucket {
   importCost: number;
   solarSavings: number;
   exportRevenue: number;
+  selfConsumptionAdvantage: number;
   exceedanceCost: number;
   avoidedExceedanceValue: number;
   solarValue: number;
@@ -69,6 +70,7 @@ interface AnalyticsTotals {
   importCost: number;
   solarSavings: number;
   exportRevenue: number;
+  selfConsumptionAdvantage: number;
   exceedanceCost: number;
   avoidedExceedanceValue: number;
   solarValue: number;
@@ -130,6 +132,11 @@ function clamp(value: number, min: number, max: number): number {
 
 function formatCurrency(value: number, currency: string): string {
   return `${fmtNum(value, 2)} ${currency}`;
+}
+
+function formatSignedCurrency(value: number, currency: string): string {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${fmtNum(Math.abs(value), 2)} ${currency}`;
 }
 
 function formatDelta(value: number, decimals = 1): string {
@@ -301,6 +308,7 @@ function buildAnalytics(
     importCost: 0,
     solarSavings: 0,
     exportRevenue: 0,
+    selfConsumptionAdvantage: 0,
     exceedanceCost: 0,
     avoidedExceedanceValue: 0,
     solarValue: 0,
@@ -330,6 +338,7 @@ function buildAnalytics(
         importCost: 0,
         solarSavings: 0,
         exportRevenue: 0,
+        selfConsumptionAdvantage: 0,
         exceedanceCost: 0,
         avoidedExceedanceValue: 0,
         solarValue: 0,
@@ -351,6 +360,7 @@ function buildAnalytics(
     const importCost = gridKwh * point.importRateWithVat;
     const solarSavings = solarToHomeKwh * point.importRateWithVat;
     const exportRevenue = exportKwh * point.feedInRate;
+    const selfConsumptionAdvantage = solarToHomeKwh * (point.importRateWithVat - point.feedInRate);
     const exceedanceCost = exceedanceKwh * point.exceedanceRateWithVat;
     const avoidedExceedanceValue = avoidedExceedanceKwh * point.exceedanceRateWithVat;
 
@@ -364,6 +374,7 @@ function buildAnalytics(
     bucket.importCost += importCost;
     bucket.solarSavings += solarSavings;
     bucket.exportRevenue += exportRevenue;
+    bucket.selfConsumptionAdvantage += selfConsumptionAdvantage;
     bucket.exceedanceCost += exceedanceCost;
     bucket.avoidedExceedanceValue += avoidedExceedanceValue;
     bucket.peakGridKw = Math.max(bucket.peakGridKw, point.gridKw);
@@ -381,6 +392,7 @@ function buildAnalytics(
     totals.importCost += importCost;
     totals.solarSavings += solarSavings;
     totals.exportRevenue += exportRevenue;
+    totals.selfConsumptionAdvantage += selfConsumptionAdvantage;
     totals.exceedanceCost += exceedanceCost;
     totals.avoidedExceedanceValue += avoidedExceedanceValue;
     totals.peakGridKw = Math.max(totals.peakGridKw, point.gridKw);
@@ -784,6 +796,11 @@ function renderSummaryStats(analytics: AnalyticsBundle, currency: string): strin
         <span class="analysis-stat-meta">Savings plus export revenue plus avoided exceedance charges</span>
       </div>
       <div class="analysis-stat-card">
+        <span class="analysis-stat-label">Self-Use vs Export</span>
+        <strong class="analysis-stat-value">${formatSignedCurrency(analytics.totals.selfConsumptionAdvantage, currency)}</strong>
+        <span class="analysis-stat-meta">${fmtNum(analytics.totals.solarToHomeKwh)} kWh kept on-site instead of exported</span>
+      </div>
+      <div class="analysis-stat-card">
         <span class="analysis-stat-label">Peak Net Grid</span>
         <strong class="analysis-stat-value">${fmtNum(analytics.totals.peakGridKw, 2)} kW</strong>
         <span class="analysis-stat-meta">Compared with ${fmtNum(analytics.totals.peakHouseKw, 2)} kW gross house load</span>
@@ -873,6 +890,10 @@ function renderSolarCoverageCard(analytics: AnalyticsBundle, currency: string): 
         <div>
           <span class="analysis-inline-label">Solar value</span>
           <strong>${formatCurrency(analytics.totals.solarValue, currency)}</strong>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Self-use vs export</span>
+          <strong>${formatSignedCurrency(analytics.totals.selfConsumptionAdvantage, currency)}</strong>
         </div>
       </div>
       <div class="analysis-share-bar">
