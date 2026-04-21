@@ -33,7 +33,9 @@ from .const import (
     CONF_METERING_POINT_1_TYPES,
     EXTRA_METER_SLOTS,
     CONF_METER_HAS_GAS,
+    OPT_ENABLE_FINANCIAL_SENSORS,
 )
+from .financials import build_financial_sensor_payloads
 from .storage import get_effective_reference_power
 
 _LOGGER = logging.getLogger(__name__)
@@ -99,6 +101,8 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Store all configured meters for frontend display
         self.meters = meters
+        self.financial_sensor_values: dict[str, float] = {}
+        self.financial_sensor_attributes: dict[str, dict[str, Any]] = {}
 
     def _meter_for_obis(self, obis_code: str) -> str:
         """Return the correct metering point ID for a given OBIS code.
@@ -266,12 +270,18 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     ) for obis_code in non_gas_obis_codes
                 ]
 
-                # Tasks for fetching detailed 15-min data for power-over-reference calculations
-                # We fetch both consumption AND production so exceedance considers solar offset.
-                power_over_ref_tasks = []
-                if get_effective_reference_power(self.hass, self.entry) is not None:
-                    _LOGGER.debug("Setting up tasks for monthly power over reference data...")
-                    power_over_ref_tasks = [
+                financial_sensors_enabled = bool(
+                    getattr(self.entry, "options", {}).get(OPT_ENABLE_FINANCIAL_SENSORS, False)
+                )
+                ref_power_kw = get_effective_reference_power(self.hass, self.entry)
+                needs_period_details = ref_power_kw is not None or financial_sensors_enabled
+
+                # Tasks for fetching detailed 15-min data for monthly invoice/exceedance calculations.
+                # We fetch both consumption and production so solar can offset net grid draw.
+                detailed_period_tasks = []
+                if needs_period_details:
+                    _LOGGER.debug("Setting up detailed current/last month tasks...")
+                    detailed_period_tasks = [
                         # Current month consumption (so far)
                         self.api_client.async_get_metering_data(
                             self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, month_start_dt, effective_month_end
@@ -430,16 +440,19 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                 # To preserve order for slicing, we'll keep aggregated_tasks separate for now
                 # In a future refactor, we could move all to a dictionary-based system
 
-                task_list = obis_tasks + aggregated_tasks + power_over_ref_tasks + list(all_tasks.values()) + extra_prod_tasks
+                task_list = obis_tasks + aggregated_tasks + detailed_period_tasks + list(all_tasks.values()) + extra_prod_tasks
                 results = await asyncio.gather(*task_list, return_exceptions=True)
                 _LOGGER.debug("All API tasks gathered.")
 
                 obis_results = results[:len(obis_tasks)]
                 aggregated_results = results[len(obis_tasks):len(obis_tasks) + len(aggregated_tasks)]
-                power_over_ref_results = results[len(obis_tasks) + len(aggregated_tasks):len(obis_tasks) + len(aggregated_tasks) + len(power_over_ref_tasks)]
+                detailed_period_results = results[
+                    len(obis_tasks) + len(aggregated_tasks):
+                    len(obis_tasks) + len(aggregated_tasks) + len(detailed_period_tasks)
+                ]
 
                 # Map results back to their keys for gas tasks
-                gas_start = len(obis_tasks) + len(aggregated_tasks) + len(power_over_ref_tasks)
+                gas_start = len(obis_tasks) + len(aggregated_tasks) + len(detailed_period_tasks)
                 gas_end = gas_start + len(all_tasks)
                 gas_results_dict = dict(zip(all_tasks.keys(), results[gas_start:gas_end]))
 
@@ -567,7 +580,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
 
                 # Sum production/export data from additional production meters
                 if extra_prod_tasks:
-                    extra_start = len(obis_tasks) + len(aggregated_tasks) + len(power_over_ref_tasks) + len(all_tasks)
+                    extra_start = len(obis_tasks) + len(aggregated_tasks) + len(detailed_period_tasks) + len(all_tasks)
                     extra_results = results[extra_start:]
                     for key, result in zip(extra_prod_map, extra_results):
                         if isinstance(result, dict):
@@ -671,35 +684,72 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                 except (TypeError, ValueError) as e:
                     _LOGGER.error("Could not calculate self-consumption values: %s", e)
 
+                yesterday_consumption_result = next(
+                    (
+                        res
+                        for obis, res in zip(non_gas_obis_codes.keys(), obis_results)
+                        if obis == CONSUMPTION_CODE
+                    ),
+                    None,
+                )
+                yesterday_production_result = next(
+                    (
+                        res
+                        for obis, res in zip(non_gas_obis_codes.keys(), obis_results)
+                        if obis == PRODUCTION_CODE
+                    ),
+                    None,
+                )
+                current_month_cons_result = (
+                    detailed_period_results[0] if len(detailed_period_results) > 0 else None
+                )
+                last_month_cons_result = (
+                    detailed_period_results[1] if len(detailed_period_results) > 1 else None
+                )
+                current_month_prod_result = (
+                    detailed_period_results[2] if len(detailed_period_results) > 2 else None
+                )
+                last_month_prod_result = (
+                    detailed_period_results[3] if len(detailed_period_results) > 3 else None
+                )
+                prod_items_yesterday: list[dict[str, Any]] = []
+                prod_items_cur: list[dict[str, Any]] = []
+                prod_items_last: list[dict[str, Any]] = []
+                if needs_period_details:
+                    prod_items_yesterday = await self._production_items_for_period(
+                        yesterday_start_dt,
+                        yesterday_end_dt,
+                        yesterday_production_result if isinstance(yesterday_production_result, dict) else None,
+                    )
+                    prod_items_cur = await self._production_items_for_period(
+                        month_start_dt,
+                        effective_month_end,
+                        current_month_prod_result if isinstance(current_month_prod_result, dict) else None,
+                    )
+                    prod_items_last = await self._production_items_for_period(
+                        start_of_last_month,
+                        end_of_last_month,
+                        last_month_prod_result if isinstance(last_month_prod_result, dict) else None,
+                    )
+
                 # Calculate power usage over reference
                 ref_power_kw = get_effective_reference_power(self.hass, self.entry)
 
                 if ref_power_kw is not None:
                     try:
                         # Yesterday's calculation — also fetch yesterday's production for solar offset
-                        consumption_result = next((res for obis, res in zip(OBIS_CODES.keys(), obis_results) if obis == CONSUMPTION_CODE), None)
-                        production_result = next((res for obis, res in zip(OBIS_CODES.keys(), obis_results) if obis == PRODUCTION_CODE), None)
-                        prod_items_yesterday = await self._production_items_for_period(
-                            yesterday_start_dt,
-                            yesterday_end_dt,
-                            production_result if isinstance(production_result, dict) else None,
-                        )
+                        consumption_result = yesterday_consumption_result
+                        production_result = yesterday_production_result
                         if isinstance(consumption_result, dict) and consumption_result.get("items"):
                             overage = self._calculate_power_overage(consumption_result["items"], ref_power_kw, prod_items_yesterday)
                             data["yesterdays_power_usage_over_reference"] = overage
                             _LOGGER.debug(f"Calculated {overage:.4f} kWh over reference for yesterday (solar-adjusted).")
 
                         # Process results for monthly power over reference
-                        # power_over_ref_results: [cur_month_cons, last_month_cons, cur_month_prod, last_month_prod]
-                        if power_over_ref_results:
+                        # detailed_period_results: [cur_month_cons, last_month_cons, cur_month_prod, last_month_prod]
+                        if detailed_period_results:
                             # Current month's calculation (solar-adjusted)
-                            current_month_cons = power_over_ref_results[0]
-                            current_month_prod = power_over_ref_results[2] if len(power_over_ref_results) > 2 else None
-                            prod_items_cur = await self._production_items_for_period(
-                                month_start_dt,
-                                effective_month_end,
-                                current_month_prod if isinstance(current_month_prod, dict) else None,
-                            )
+                            current_month_cons = current_month_cons_result
                             if isinstance(current_month_cons, dict) and current_month_cons.get("items"):
                                 overage = self._calculate_power_overage(current_month_cons["items"], ref_power_kw, prod_items_cur)
                                 data["current_month_power_usage_over_reference"] = overage
@@ -708,13 +758,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                                 _LOGGER.error("Error fetching current month power over reference data: %s", current_month_cons)
 
                             # Last month's calculation (solar-adjusted)
-                            last_month_cons = power_over_ref_results[1]
-                            last_month_prod = power_over_ref_results[3] if len(power_over_ref_results) > 3 else None
-                            prod_items_last = await self._production_items_for_period(
-                                start_of_last_month,
-                                end_of_last_month,
-                                last_month_prod if isinstance(last_month_prod, dict) else None,
-                            )
+                            last_month_cons = last_month_cons_result
                             if isinstance(last_month_cons, dict) and last_month_cons.get("items"):
                                 overage = self._calculate_power_overage(last_month_cons["items"], ref_power_kw, prod_items_last)
                                 data["last_month_power_usage_over_reference"] = overage
@@ -723,6 +767,56 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                                 _LOGGER.error("Error fetching last month power over reference data: %s", last_month_cons)
                     except (ValueError, TypeError) as e:
                         _LOGGER.error(f"Could not calculate power usage over reference: {e}")
+
+                if financial_sensors_enabled:
+                    try:
+                        period_inputs = {
+                            "yesterday": {
+                                "start": yesterday_start_dt,
+                                "end": yesterday_end_dt,
+                                "consumption_items": (
+                                    yesterday_consumption_result.get("items", [])
+                                    if isinstance(yesterday_consumption_result, dict)
+                                    else []
+                                ),
+                                "production_items": prod_items_yesterday,
+                            },
+                            "current_month": {
+                                "start": month_start_dt,
+                                "end": effective_month_end,
+                                "consumption_items": (
+                                    current_month_cons_result.get("items", [])
+                                    if isinstance(current_month_cons_result, dict)
+                                    else []
+                                ),
+                                "production_items": prod_items_cur,
+                            },
+                            "last_month": {
+                                "start": start_of_last_month,
+                                "end": end_of_last_month,
+                                "consumption_items": (
+                                    last_month_cons_result.get("items", [])
+                                    if isinstance(last_month_cons_result, dict)
+                                    else []
+                                ),
+                                "production_items": prod_items_last,
+                            },
+                        }
+                        self.financial_sensor_values, self.financial_sensor_attributes = (
+                            build_financial_sensor_payloads(
+                                self.hass,
+                                self,
+                                data,
+                                period_inputs,
+                            )
+                        )
+                    except Exception as err:
+                        _LOGGER.error("Could not build Leneda financial sensors: %s", err)
+                        self.financial_sensor_values = {}
+                        self.financial_sensor_attributes = {}
+                else:
+                    self.financial_sensor_values = {}
+                    self.financial_sensor_attributes = {}
 
 
                 _LOGGER.debug("--- Leneda Data Update Finished ---")

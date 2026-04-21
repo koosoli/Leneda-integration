@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -24,6 +25,7 @@ from .const import (
     OBIS_CODES,
 )
 from .coordinator import LenedaDataUpdateCoordinator
+from .financials import get_currency
 from .sensor_catalog import get_sensor_definitions, sensor_enabled_by_default
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,6 +68,8 @@ async def async_setup_entry(
             return production_meter_id
         if key.startswith(("g_", "7-")):
             return gas_meter_id
+        if key.startswith("f_"):
+            return consumption_meter_id
         if "power_usage_over_reference" in key:
             return consumption_meter_id
         return metering_point_id
@@ -141,6 +145,16 @@ async def async_setup_entry(
                     meter_id,
                     key,
                     details,
+                    enabled_default,
+                )
+            )
+        elif sensor_type == "financial":
+            sensors.append(
+                LenedaFinancialSensor(
+                    coordinator,
+                    meter_id,
+                    key,
+                    name,
                     enabled_default,
                 )
             )
@@ -296,6 +310,70 @@ class LenedaEnergySensor(CoordinatorEntity[LenedaDataUpdateCoordinator], SensorE
         if self.coordinator.data:
             return self.coordinator.data.get(self._key)
         return None
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return super().available and self.coordinator.data is not None
+
+
+class LenedaFinancialSensor(CoordinatorEntity[LenedaDataUpdateCoordinator], SensorEntity):
+    """Representation of a Leneda monetary sensor."""
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_icon = "mdi:cash-multiple"
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        coordinator: LenedaDataUpdateCoordinator,
+        metering_point_id: str,
+        sensor_key: str,
+        name: str,
+        enabled_default: bool,
+    ) -> None:
+        """Initialize the financial sensor."""
+        super().__init__(coordinator)
+        self._key = sensor_key
+        self._attr_name = name
+        self._attr_unique_id = f"{metering_point_id}_{sensor_key}_v3"
+        self._attr_entity_registry_enabled_default = enabled_default
+
+        base_meter_id = self._get_base_meter_id(metering_point_id)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, base_meter_id)},
+            name=f"Leneda (...{base_meter_id[-7:]})",
+            manufacturer="Leneda",
+            model="Smart Meter",
+            sw_version=coordinator.version,
+        )
+
+    def _get_base_meter_id(self, metering_point_id: str) -> str:
+        """Extract base meter ID for device consolidation."""
+        if len(metering_point_id) >= 34 and metering_point_id.startswith("LU"):
+            if "779999999" in metering_point_id:
+                return metering_point_id.replace("779999999", "079999999")
+            if "079999999" in metering_point_id:
+                return metering_point_id
+        return metering_point_id
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return the active billing currency."""
+        return get_currency(self.coordinator.hass)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the financial sensor value."""
+        return self.coordinator.financial_sensor_values.get(self._key)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra calculation details."""
+        return self.coordinator.financial_sensor_attributes.get(self._key)
 
     @property
     def available(self) -> bool:

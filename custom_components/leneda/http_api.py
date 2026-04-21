@@ -911,6 +911,14 @@ class LenedaConfigView(HomeAssistantView):
             config = BillingConfig.from_dict(data)
             storage.billing_config = config
             await storage.async_save()
+            coordinators = _get_coordinators(hass)
+            if coordinators:
+                import asyncio as _aio
+
+                await _aio.gather(
+                    *(coordinator.async_request_refresh() for coordinator in coordinators),
+                    return_exceptions=True,
+                )
             return self.json({"status": "ok"})
         except Exception as e:
             _LOGGER.error("Error updating config: %s", e)

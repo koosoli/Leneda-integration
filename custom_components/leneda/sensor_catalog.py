@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from .const import (
     OPT_ENABLE_ADVANCED_GAS_SENSORS,
     OPT_ENABLE_COMMUNITY_SENSORS,
+    OPT_ENABLE_FINANCIAL_SENSORS,
     OPT_ENABLE_PEAK_SENSORS,
     OPT_ENABLE_WEEKLY_SENSORS,
     SENSOR_PACK_DEFAULTS,
@@ -104,6 +105,21 @@ REFERENCE_SENSOR_DEFINITIONS: tuple[SensorDefinition, ...] = (
     SensorDefinition("last_month_power_usage_over_reference", "57 - Last Month's Power Usage Over Reference", "energy"),
 )
 
+FINANCIAL_SENSOR_DEFINITIONS: tuple[SensorDefinition, ...] = (
+    SensorDefinition("f_yesterday_invoice_estimate", "58 - Estimated Invoice Total (Yesterday)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_current_month_invoice_estimate", "59 - Estimated Invoice Total (Current Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_last_month_invoice_estimate", "60 - Estimated Invoice Total (Last Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_yesterday_feed_in_revenue", "61 - Feed-in Revenue (Yesterday)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_current_month_feed_in_revenue", "62 - Feed-in Revenue (Current Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_last_month_feed_in_revenue", "63 - Feed-in Revenue (Last Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_yesterday_self_consumption_savings", "64 - Self-Consumption Savings (Yesterday)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_current_month_self_consumption_savings", "65 - Self-Consumption Savings (Current Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_last_month_self_consumption_savings", "66 - Self-Consumption Savings (Last Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_yesterday_total_solar_value", "67 - Total Solar Value (Yesterday)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_current_month_total_solar_value", "68 - Total Solar Value (Current Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_last_month_total_solar_value", "69 - Total Solar Value (Last Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+)
+
 ALL_SENSOR_DEFINITIONS: tuple[SensorDefinition, ...] = (
     CORE_SENSOR_DEFINITIONS
     + WEEKLY_SENSOR_DEFINITIONS
@@ -112,6 +128,7 @@ ALL_SENSOR_DEFINITIONS: tuple[SensorDefinition, ...] = (
     + GAS_CORE_SENSOR_DEFINITIONS
     + ADVANCED_GAS_SENSOR_DEFINITIONS
     + REFERENCE_SENSOR_DEFINITIONS
+    + FINANCIAL_SENSOR_DEFINITIONS
 )
 
 SENSOR_DEFINITION_BY_KEY = {definition.key: definition for definition in ALL_SENSOR_DEFINITIONS}
@@ -131,6 +148,7 @@ def get_sensor_definitions(has_gas: bool, has_reference: bool) -> list[SensorDef
         definitions.extend(ADVANCED_GAS_SENSOR_DEFINITIONS)
     if has_reference:
         definitions.extend(REFERENCE_SENSOR_DEFINITIONS)
+    definitions.extend(FINANCIAL_SENSOR_DEFINITIONS)
     return definitions
 
 

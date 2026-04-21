@@ -85,7 +85,8 @@
           "enable_weekly_sensors": "Weekly sensors",
           "enable_peak_sensors": "Peak OBIS sensors",
           "enable_community_sensors": "Community sharing sensors",
-          "enable_advanced_gas_sensors": "Advanced gas sensors"
+          "enable_advanced_gas_sensors": "Advanced gas sensors",
+          "enable_financial_sensors": "Financial sensors"
         }
       }
     },
