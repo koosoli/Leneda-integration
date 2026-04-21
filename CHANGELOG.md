@@ -10,6 +10,8 @@ All notable changes to the **Leneda HACS Integration** will be documented in thi
 
 ### Improvements
 - **Feed-in Row kWh Display:** Added exported `kWh` alongside each feed-in revenue row so multi-system invoices show the energy allocation and tariff together at a glance.
+- **Home Assistant Reconfiguration:** Added an editable integration configuration flow so meters, credentials, and reference power can be changed from `Configure` without deleting and re-adding the integration.
+- **Home Assistant Sensor Packs:** Reduced the default Home Assistant sensor set for new installs and added optional sensor-pack toggles in `Configure` so weekly, peak, community, and advanced gas sensors can be enabled only when wanted.
 - **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.7.0`.
 
 

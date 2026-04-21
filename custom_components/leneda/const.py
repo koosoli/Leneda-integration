@@ -43,6 +43,26 @@ CONF_REFERENCE_POWER_ENTITY = "reference_power_entity"
 CONF_REFERENCE_POWER_STATIC = "reference_power_static"
 CONF_METER_HAS_GAS = "meter_has_gas"  # legacy, kept for backward compat
 
+# Optional Home Assistant sensor groups
+OPT_ENABLE_WEEKLY_SENSORS = "enable_weekly_sensors"
+OPT_ENABLE_PEAK_SENSORS = "enable_peak_sensors"
+OPT_ENABLE_COMMUNITY_SENSORS = "enable_community_sensors"
+OPT_ENABLE_ADVANCED_GAS_SENSORS = "enable_advanced_gas_sensors"
+
+SENSOR_PACK_OPTIONS = (
+    OPT_ENABLE_WEEKLY_SENSORS,
+    OPT_ENABLE_PEAK_SENSORS,
+    OPT_ENABLE_COMMUNITY_SENSORS,
+    OPT_ENABLE_ADVANCED_GAS_SENSORS,
+)
+
+SENSOR_PACK_DEFAULTS = {
+    OPT_ENABLE_WEEKLY_SENSORS: False,
+    OPT_ENABLE_PEAK_SENSORS: False,
+    OPT_ENABLE_COMMUNITY_SENSORS: False,
+    OPT_ENABLE_ADVANCED_GAS_SENSORS: False,
+}
+
 # Meter type constants
 METER_TYPE_CONSUMPTION = "consumption"
 METER_TYPE_PRODUCTION = "production"
