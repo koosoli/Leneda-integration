@@ -30,7 +30,7 @@ class BillingConfig:
     exceedance_rate: float = 0.0765
     feed_in_tariff: float = 0.08
     consumption_rate_windows: list = field(default_factory=list)  # [{label, day_group, start_time, end_time, rate}]
-    feed_in_rates: list = field(default_factory=list)  # [{meter_id, mode, tariff, sensor_entity}]
+    feed_in_rates: list = field(default_factory=list)  # [{meter_id, mode, tariff, sensor_entity, self_use_priority}]
     meter_monthly_fees: list = field(default_factory=list)  # [{meter_id, label, fee}]
     gas_fixed_fee: float = 6.50
     gas_variable_rate: float = 0.0550
@@ -167,7 +167,16 @@ class BillingConfig:
     def _migrate_feed_in_rates(cls, data: dict) -> list:
         """Build feed_in_rates list — migrate legacy single-mode fields if present."""
         if "feed_in_rates" in data and isinstance(data["feed_in_rates"], list):
-            return data["feed_in_rates"]
+            migrated_rates = []
+            for idx, rate in enumerate(data["feed_in_rates"], start=1):
+                if not isinstance(rate, dict):
+                    continue
+                migrated_rate = dict(rate)
+                migrated_rate["self_use_priority"] = int(
+                    cls._coerce_float(migrated_rate.get("self_use_priority"), float(idx))
+                )
+                migrated_rates.append(migrated_rate)
+            return migrated_rates
         # Legacy migration: single feed_in_mode / feed_in_sensor_entity → rates[]
         mode = data.get("feed_in_mode", "")
         sensor_entity = data.get("feed_in_sensor_entity", "")
@@ -183,7 +192,8 @@ class BillingConfig:
                         "mode": mode or "fixed",
                         "tariff": tariff,
                         "sensor_entity": sensor_entity,
+                        "self_use_priority": idx + 1,
                     }
-                    for m in prod_meters
+                    for idx, m in enumerate(prod_meters)
                 ]
         return []

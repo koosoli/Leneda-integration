@@ -8,7 +8,7 @@ import type {
   ReferencePowerWindow,
   TimeseriesResponse,
 } from "../api/leneda";
-import { fmtDate, fmtDateTime, fmtNum } from "../utils/format";
+import { fmtDate, fmtDateLong, fmtDateTime, fmtNum } from "../utils/format";
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HEATMAP_LABELS = {
@@ -460,7 +460,7 @@ function rangeLabel(state: AppState): string {
 
 function rangeSubtitle(state: AppState): string {
   if (state.rangeData?.start && state.rangeData?.end) {
-    return `${new Date(state.rangeData.start).toLocaleDateString()} - ${new Date(state.rangeData.end).toLocaleDateString()}`;
+    return `${fmtDateLong(state.rangeData.start)} - ${fmtDateLong(state.rangeData.end)}`;
   }
   if (state.range === "custom" && state.customStart && state.customEnd) {
     return `${state.customStart} - ${state.customEnd}`;
@@ -470,7 +470,7 @@ function rangeSubtitle(state: AppState): string {
 
 function comparisonLabel(state: AppState): string {
   if (!state.analysisComparison) return "Previous matched period";
-  return `Previous matched period: ${new Date(state.analysisComparison.start).toLocaleDateString()} - ${new Date(state.analysisComparison.end).toLocaleDateString()}`;
+  return `Previous matched period: ${fmtDateLong(state.analysisComparison.start)} - ${fmtDateLong(state.analysisComparison.end)}`;
 }
 
 function renderLineChart(options: {
@@ -741,7 +741,7 @@ function renderRangeControls(state: AppState): string {
     ${state.rangeData?.start && state.rangeData?.end
       ? `
         <div class="range-info-bar">
-          Period: ${new Date(state.rangeData.start).toLocaleDateString()} - ${new Date(state.rangeData.end).toLocaleDateString()}
+          Period: ${fmtDateLong(state.rangeData.start)} - ${fmtDateLong(state.rangeData.end)}
         </div>
       `
       : ""}

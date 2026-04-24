@@ -11,10 +11,12 @@ import {
   fetchMode,
   fetchCredentials,
   fetchTimeseries,
+  fetchPerMeterTimeseries,
   type RangeData,
   type TimeRange,
   type SensorsResponse,
   type TimeseriesResponse,
+  type PerMeterTimeseriesResponse,
   type BillingConfig,
   type Credentials,
   type MeterConfig,
@@ -87,6 +89,7 @@ export interface AppState {
   rangeData: RangeData | null;
   consumptionTimeseries: TimeseriesResponse | null;
   productionTimeseries: TimeseriesResponse | null;
+  perMeterProductionTimeseries: PerMeterTimeseriesResponse | null;
   sensors: SensorsResponse | null;
   config: BillingConfig | null;
   loading: boolean;
@@ -102,6 +105,28 @@ function parseDateInputValue(value: string): Date | null {
   if (!match) return null;
   const [, year, month, day] = match;
   return new Date(Number(year), Number(month) - 1, Number(day));
+}
+
+function formatLocalDateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toLocalOffsetIso(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const offsetHours = String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, "0");
+  const offsetRemainder = String(Math.abs(offsetMinutes) % 60).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}${sign}${offsetHours}:${offsetRemainder}`;
 }
 
 function sameLocalDate(a: Date, b: Date): boolean {
@@ -203,6 +228,7 @@ export class LenedaApp {
     rangeData: null,
     consumptionTimeseries: null,
     productionTimeseries: null,
+    perMeterProductionTimeseries: null,
     sensors: null,
     config: null,
     loading: true,
@@ -287,10 +313,30 @@ export class LenedaApp {
     this.state.rangeData = null;
     this.state.consumptionTimeseries = null;
     this.state.productionTimeseries = null;
+    this.state.perMeterProductionTimeseries = null;
     this.clearChartViewport();
     this.state.analysisComparison = null;
     this.state.analysisComparisonLoading = false;
     this.state.error = this.toDisplayError(error, fallback);
+  }
+
+  private async fetchPerMeterProductionForRange(
+    config: BillingConfig | null,
+    start: string,
+    end: string,
+  ): Promise<PerMeterTimeseriesResponse | null> {
+    const productionMeters = (config?.meters ?? []).filter((meter) => meter.types.includes("production"));
+    if (productionMeters.length <= 1) {
+      return null;
+    }
+
+    try {
+      const perMeter = await fetchPerMeterTimeseries("1-1:2.29.0", start, end);
+      return perMeter.meters?.length ? perMeter : null;
+    } catch (error) {
+      console.warn("Per-meter production fetch failed:", error);
+      return null;
+    }
   }
 
   private resetAnalysisComparison(): void {
@@ -385,13 +431,15 @@ export class LenedaApp {
         fetchConfig(),
       ]);
       const { start, end } = this.getDateRangeISO();
-      const [consumptionTimeseries, productionTimeseries] = await Promise.all([
+      const [consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
         fetchTimeseries("1-1:1.29.0", start, end),
         fetchTimeseries("1-1:2.29.0", start, end),
+        this.fetchPerMeterProductionForRange(config, start, end),
       ]);
       this.state.rangeData = rangeData;
       this.state.consumptionTimeseries = consumptionTimeseries;
       this.state.productionTimeseries = productionTimeseries;
+      this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
       this.state.sensors = sensors;
       this.state.config = config;
     } catch (e) {
@@ -418,8 +466,8 @@ export class LenedaApp {
         end.setDate(end.getDate() - 1);
         const start = new Date(end);
         start.setDate(start.getDate() - 6);
-        this.state.customStart = start.toISOString().slice(0, 10);
-        this.state.customEnd = end.toISOString().slice(0, 10);
+        this.state.customStart = formatLocalDateInput(start);
+        this.state.customEnd = formatLocalDateInput(end);
       }
       // Just show the picker — don't fetch until Apply is clicked
       this.render();
@@ -466,18 +514,14 @@ export class LenedaApp {
       const dataPromise = matchedPreset
         ? fetchRangeData(matchedPreset)
         : import("../api/leneda").then(({ fetchCustomData }) => fetchCustomData(customStart, customEnd));
-      const [data, consumptionTimeseries, productionTimeseries] = await Promise.all([
+      const config = this.state.config;
+      const startIso = toLocalOffsetIso(new Date(customStart + "T00:00:00"));
+      const endIso = toLocalOffsetIso(new Date(customEnd + "T23:59:59.999"));
+      const [data, consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
         dataPromise,
-        fetchTimeseries(
-          "1-1:1.29.0",
-          new Date(customStart + "T00:00:00").toISOString(),
-          new Date(customEnd + "T23:59:59.999").toISOString(),
-        ),
-        fetchTimeseries(
-          "1-1:2.29.0",
-          new Date(customStart + "T00:00:00").toISOString(),
-          new Date(customEnd + "T23:59:59.999").toISOString(),
-        ),
+        fetchTimeseries("1-1:1.29.0", startIso, endIso),
+        fetchTimeseries("1-1:2.29.0", startIso, endIso),
+        this.fetchPerMeterProductionForRange(config, startIso, endIso),
       ]);
       this.state.rangeData = {
         range: "custom",
@@ -500,6 +544,7 @@ export class LenedaApp {
       };
       this.state.consumptionTimeseries = consumptionTimeseries;
       this.state.productionTimeseries = productionTimeseries;
+      this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
     } catch (e) {
       this.clearRangeStateWithError(e, "Missing data");
     } finally {
@@ -991,7 +1036,13 @@ export class LenedaApp {
       });
 
       // Collect per-meter feed-in rates
-      const feedInRates: Array<{ meter_id: string; mode: string; tariff: number; sensor_entity: string }> = [];
+      const feedInRates: Array<{
+        meter_id: string;
+        mode: string;
+        tariff: number;
+        sensor_entity: string;
+        self_use_priority: number;
+      }> = [];
       const ratePattern = /^feed_in_rate_(\d+)_(.+)$/;
       const rateMap: Record<string, Record<string, string>> = {};
 
@@ -1043,6 +1094,7 @@ export class LenedaApp {
           mode: mode,
           tariff: parseFloat(effectiveTariffStr ?? "0.08") || 0.08,
           sensor_entity: rm.sensor_entity ?? "",
+          self_use_priority: Math.max(1, parseInt(rm.self_use_priority ?? `${Number(idx) + 1}`, 10) || Number(idx) + 1),
         });
       }
       if (feedInRates.length > 0) data.feed_in_rates = feedInRates;
@@ -1188,7 +1240,7 @@ export class LenedaApp {
   private async initChart(canvas: HTMLCanvasElement): Promise<void> {
     try {
       const { renderEnergyChart } = await import("./Charts");
-      const { fetchTimeseries, fetchPerMeterTimeseries } = await import("../api/leneda");
+      const { fetchTimeseries } = await import("../api/leneda");
       const { start, end } = this.getDateRangeISO();
       const viewportStartMs = this.state.chartViewportStart
         ? new Date(this.state.chartViewportStart).getTime()
@@ -1215,11 +1267,14 @@ export class LenedaApp {
         (m) => m.types.includes("production"),
       );
       let perMeterProduction = undefined;
-      if (productionMeters.length > 1) {
+      if (this.state.perMeterProductionTimeseries?.meters?.length) {
+        perMeterProduction = this.state.perMeterProductionTimeseries.meters;
+      } else if (productionMeters.length > 1) {
         try {
           const perMeterResp = await fetchPerMeterTimeseries("1-1:2.29.0", start, end);
           if (perMeterResp.meters && perMeterResp.meters.length > 1) {
             perMeterProduction = perMeterResp.meters;
+            this.state.perMeterProductionTimeseries = perMeterResp;
           }
         } catch (e) {
           console.warn("Per-meter timeseries fetch failed, using merged view:", e);
@@ -1262,9 +1317,10 @@ export class LenedaApp {
       const endDate = end.slice(0, 10);
       this.resetAnalysisComparison();
       const data = await fetchCustomData(start, end);
-      const [consumptionTimeseries, productionTimeseries] = await Promise.all([
+      const [consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
         fetchTimeseries("1-1:1.29.0", start, end),
         fetchTimeseries("1-1:2.29.0", start, end),
+        this.fetchPerMeterProductionForRange(this.state.config, start, end),
       ]);
 
       // Keep the date picker values stable, but preserve the exact chart viewport separately.
@@ -1294,6 +1350,7 @@ export class LenedaApp {
       };
       this.state.consumptionTimeseries = consumptionTimeseries;
       this.state.productionTimeseries = productionTimeseries;
+      this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
 
       // Full re-render so the chart can rebuild with a finer aggregation for the zoomed period.
       this.renderPreserveMainScroll();
@@ -1316,7 +1373,7 @@ export class LenedaApp {
     }
 
     const now = new Date();
-    const fmt = (d: Date) => d.toISOString();
+    const fmt = (d: Date) => toLocalOffsetIso(d);
 
     switch (this.state.range) {
       case "custom": {

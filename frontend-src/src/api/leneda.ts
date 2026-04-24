@@ -125,6 +125,8 @@ export interface FeedInRate {
   mode: "fixed" | "sensor";
   tariff: number;
   sensor_entity: string;
+  /** Lower numbers are consumed first at home before later PV systems. */
+  self_use_priority?: number;
   /** Resolved sensor value (set by backend, read-only). */
   sensor_value?: number | null;
 }

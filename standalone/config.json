@@ -50,14 +50,16 @@
       {
         "meter_id": "LU0000010983800000000000770590176",
         "mode": "fixed",
-        "tariff": 0.08,
-        "sensor_entity": ""
+        "tariff": 0.03,
+        "sensor_entity": "",
+        "self_use_priority": 1
       },
       {
         "meter_id": "LU0000010983800000000000770578580",
         "mode": "fixed",
         "tariff": 0.1456,
-        "sensor_entity": ""
+        "sensor_entity": "",
+        "self_use_priority": 2
       }
     ],
     "gas_fixed_fee": 6.5,

@@ -441,6 +441,7 @@ export function renderSettings(
       mode: "fixed",
       tariff: config?.feed_in_tariff ?? 0.08,
       sensor_entity: "",
+      self_use_priority: productionMeters.findIndex((meter) => meter.id === meterId) + 1,
     };
   }
 
@@ -454,6 +455,20 @@ export function renderSettings(
             <div class="feed-in-meter-header">
               <span class="meter-type-badge meter-type-production">☀️ ${shortId}</span>
               <input type="hidden" name="feed_in_rate_${idx}_meter_id" value="${m.id}" />
+            </div>
+            <div class="form-row">
+              <label for="cfg-feed_in_rate_${idx}_priority">Self-use Priority</label>
+              <div class="input-group">
+                <input
+                  id="cfg-feed_in_rate_${idx}_priority"
+                  name="feed_in_rate_${idx}_self_use_priority"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value="${r.self_use_priority ?? idx + 1}"
+                />
+                <span class="input-unit">1 = used first at home</span>
+              </div>
             </div>
             <div class="form-row">
               <label>Pricing Mode</label>

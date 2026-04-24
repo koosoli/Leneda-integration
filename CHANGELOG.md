@@ -3,16 +3,26 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.8.0] - 2026-04-24
+
+### New Features
+- **Feed-in Row kWh Display:** Added exported `kWh` alongside each feed-in revenue row so multi-system invoices show the energy allocation and tariff together at a glance.
+- **Home Assistant Reconfiguration:** Added an editable integration configuration flow so meters, credentials, and reference power can be changed from `Configure` without deleting and re-adding the integration.
+- **Home Assistant Sensor Packs:** Reduced the default Home Assistant sensor set for new installs and added optional sensor-pack toggles in `Configure` so weekly, peak, community, advanced gas, and financial sensors can be enabled only when wanted.
+- **Financial Home Assistant Sensors:** Added an optional financial sensor pack with invoice estimate, feed-in revenue, self-consumption savings, and total solar value for yesterday, current month, and last month.
+
+### Improvements
+- **Options Flow Stability:** Improved Home Assistant `Configure` flow compatibility and hardened entity-registry handling so the options flow opens more reliably.
+- **Priority-Based Solar Allocation:** Reworked self-use vs export and per-system feed-in allocation so multiple PV systems now use per-meter 15-minute production plus configurable self-use priority instead of averaging export tariffs.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.8.0`.
+
+
 ## [v2.7.0] - 2026-04-21
 
 ### New Features
 - **Self-Use vs Export Value:** Added a dedicated solar metric that shows how much more or less self-consumed PV was worth compared with selling the same energy back to the grid.
 
 ### Improvements
-- **Feed-in Row kWh Display:** Added exported `kWh` alongside each feed-in revenue row so multi-system invoices show the energy allocation and tariff together at a glance.
-- **Home Assistant Reconfiguration:** Added an editable integration configuration flow so meters, credentials, and reference power can be changed from `Configure` without deleting and re-adding the integration.
-- **Home Assistant Sensor Packs:** Reduced the default Home Assistant sensor set for new installs and added optional sensor-pack toggles in `Configure` so weekly, peak, community, and advanced gas sensors can be enabled only when wanted.
-- **Financial Home Assistant Sensors:** Added an optional financial sensor pack with invoice estimate, feed-in revenue, self-consumption savings, and total solar value for yesterday, current month, and last month.
 - **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.7.0`.
 
 

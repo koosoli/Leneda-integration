@@ -182,23 +182,21 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
 
         return [merged[key] for key in sorted(merged.keys())]
 
-    async def _production_items_for_period(
+    async def _production_items_by_meter_for_period(
         self,
         start_dt,
         end_dt,
         primary_result: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return merged production items for all configured production meters."""
-        payloads: list[dict[str, Any]] = []
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return production timeseries items keyed by production meter id."""
+        payloads: dict[str, dict[str, Any]] = {}
 
         if isinstance(primary_result, dict):
-            payloads.append(primary_result)
+            payloads[self.production_meter] = primary_result
         elif self.production_meter:
             try:
-                payloads.append(
-                    await self.api_client.async_get_metering_data(
-                        self.production_meter, "1-1:2.29.0", start_dt, end_dt
-                    )
+                payloads[self.production_meter] = await self.api_client.async_get_metering_data(
+                    self.production_meter, "1-1:2.29.0", start_dt, end_dt
                 )
             except Exception as err:
                 _LOGGER.error("Error fetching production data for %s to %s: %s", start_dt, end_dt, err)
@@ -213,7 +211,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
 
             for meter_id, result in zip(self.production_meters[1:], extra_results):
                 if isinstance(result, dict):
-                    payloads.append(result)
+                    payloads[meter_id] = result
                 elif isinstance(result, Exception):
                     _LOGGER.error(
                         "Error fetching production data for meter %s between %s and %s: %s",
@@ -223,7 +221,26 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         result,
                     )
 
-        return self._merge_timeseries_items(payloads)
+        return {
+            meter_id: payload.get("items", [])
+            for meter_id, payload in payloads.items()
+            if isinstance(payload, dict)
+        }
+
+    async def _production_items_for_period(
+        self,
+        start_dt,
+        end_dt,
+        primary_result: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return merged production items for all configured production meters."""
+        per_meter_items = await self._production_items_by_meter_for_period(
+            start_dt, end_dt, primary_result
+        )
+        return self._merge_timeseries_items([
+            {"items": items}
+            for items in per_meter_items.values()
+        ])
 
     async def _async_update_data(self) -> dict[str, float | None]:
         """Fetch data from the Leneda API concurrently."""
@@ -715,22 +732,37 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                 prod_items_yesterday: list[dict[str, Any]] = []
                 prod_items_cur: list[dict[str, Any]] = []
                 prod_items_last: list[dict[str, Any]] = []
+                prod_items_yesterday_by_meter: dict[str, list[dict[str, Any]]] = {}
+                prod_items_cur_by_meter: dict[str, list[dict[str, Any]]] = {}
+                prod_items_last_by_meter: dict[str, list[dict[str, Any]]] = {}
                 if needs_period_details:
-                    prod_items_yesterday = await self._production_items_for_period(
+                    prod_items_yesterday_by_meter = await self._production_items_by_meter_for_period(
                         yesterday_start_dt,
                         yesterday_end_dt,
                         yesterday_production_result if isinstance(yesterday_production_result, dict) else None,
                     )
-                    prod_items_cur = await self._production_items_for_period(
+                    prod_items_yesterday = self._merge_timeseries_items([
+                        {"items": items}
+                        for items in prod_items_yesterday_by_meter.values()
+                    ])
+                    prod_items_cur_by_meter = await self._production_items_by_meter_for_period(
                         month_start_dt,
                         effective_month_end,
                         current_month_prod_result if isinstance(current_month_prod_result, dict) else None,
                     )
-                    prod_items_last = await self._production_items_for_period(
+                    prod_items_cur = self._merge_timeseries_items([
+                        {"items": items}
+                        for items in prod_items_cur_by_meter.values()
+                    ])
+                    prod_items_last_by_meter = await self._production_items_by_meter_for_period(
                         start_of_last_month,
                         end_of_last_month,
                         last_month_prod_result if isinstance(last_month_prod_result, dict) else None,
                     )
+                    prod_items_last = self._merge_timeseries_items([
+                        {"items": items}
+                        for items in prod_items_last_by_meter.values()
+                    ])
 
                 # Calculate power usage over reference
                 ref_power_kw = get_effective_reference_power(self.hass, self.entry)
@@ -780,6 +812,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                                     else []
                                 ),
                                 "production_items": prod_items_yesterday,
+                                "per_meter_production_items": prod_items_yesterday_by_meter,
                             },
                             "current_month": {
                                 "start": month_start_dt,
@@ -790,6 +823,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                                     else []
                                 ),
                                 "production_items": prod_items_cur,
+                                "per_meter_production_items": prod_items_cur_by_meter,
                             },
                             "last_month": {
                                 "start": start_of_last_month,
@@ -800,6 +834,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                                     else []
                                 ),
                                 "production_items": prod_items_last,
+                                "per_meter_production_items": prod_items_last_by_meter,
                             },
                         }
                         self.financial_sensor_values, self.financial_sensor_attributes = (

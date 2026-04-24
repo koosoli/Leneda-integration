@@ -102,6 +102,141 @@ def get_currency(hass) -> str:
     return get_billing_config(hass).currency or "EUR"
 
 
+def _production_meter_ids(coordinator) -> list[str]:
+    """Return configured production meter ids in user order."""
+    configured = [
+        str(meter_id).strip()
+        for meter_id in getattr(coordinator, "production_meters", []) or []
+        if str(meter_id).strip()
+    ]
+    if configured:
+        return configured
+
+    return [
+        str(meter_id).strip()
+        for meter_id, meter_types in getattr(coordinator, "meters", [])
+        if str(meter_id).strip() and "production" in (meter_types or [])
+    ]
+
+
+def _resolve_ordered_feed_in_rates(
+    hass,
+    billing_config: BillingConfig,
+    production_meter_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Resolve per-meter feed-in rates and self-use priority order."""
+    resolved: list[dict[str, Any]] = []
+
+    for idx, meter_id in enumerate(production_meter_ids, start=1):
+        rate_entry = next(
+            (
+                entry
+                for entry in (billing_config.feed_in_rates or [])
+                if isinstance(entry, dict) and entry.get("meter_id") == meter_id
+            ),
+            None,
+        )
+        priority_raw = rate_entry.get("self_use_priority") if rate_entry else idx
+        try:
+            priority = max(1, int(float(priority_raw)))
+        except (TypeError, ValueError):
+            priority = idx
+
+        resolved.append(
+            {
+                "meter_id": meter_id,
+                "rate": _resolve_feed_in_rate(hass, billing_config, meter_id),
+                "self_use_priority": priority,
+                "original_order": idx,
+            }
+        )
+
+    resolved.sort(key=lambda item: (item["self_use_priority"], item["original_order"]))
+    return resolved
+
+
+def _build_value_map(items: list[dict[str, Any]]) -> dict[str, float]:
+    """Aggregate Leneda 15-minute items by timestamp."""
+    values: dict[str, float] = {}
+    for item in items:
+        try:
+            timestamp = str(item.get("startedAt") or "")
+            if not timestamp:
+                continue
+            values[timestamp] = values.get(timestamp, 0.0) + max(0.0, float(item.get("value") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
+def _allocate_priority_solar(
+    consumption_items: list[dict[str, Any]],
+    per_meter_production_items: dict[str, list[dict[str, Any]]] | None,
+    resolved_rates: list[dict[str, Any]],
+    official_self_consumed_kwh: float,
+    official_exported_kwh: float,
+) -> dict[str, float] | None:
+    """Allocate self-consumption and export by configured PV priority."""
+    if not consumption_items or not per_meter_production_items or not resolved_rates:
+        return None
+
+    house_by_ts = _build_value_map(consumption_items)
+    production_by_meter = {
+        meter_id: _build_value_map(items)
+        for meter_id, items in (per_meter_production_items or {}).items()
+    }
+    if not any(production_by_meter.get(rate["meter_id"]) for rate in resolved_rates):
+        return None
+
+    timestamps = set(house_by_ts.keys())
+    for meter_values in production_by_meter.values():
+        timestamps.update(meter_values.keys())
+
+    totals: dict[str, dict[str, float]] = {
+        rate["meter_id"]: {
+            "rate": float(rate["rate"]),
+            "self_consumed_kwh": 0.0,
+            "exported_kwh": 0.0,
+            "produced_kwh": 0.0,
+        }
+        for rate in resolved_rates
+    }
+
+    for timestamp in sorted(timestamps):
+        remaining_house_kw = max(0.0, house_by_ts.get(timestamp, 0.0))
+        for rate in resolved_rates:
+            meter_id = rate["meter_id"]
+            solar_kw = max(0.0, production_by_meter.get(meter_id, {}).get(timestamp, 0.0))
+            self_used_kw = min(remaining_house_kw, solar_kw)
+            totals[meter_id]["produced_kwh"] += solar_kw * 0.25
+            totals[meter_id]["self_consumed_kwh"] += self_used_kw * 0.25
+            totals[meter_id]["exported_kwh"] += max(0.0, solar_kw - self_used_kw) * 0.25
+            remaining_house_kw = max(0.0, remaining_house_kw - self_used_kw)
+
+    raw_self_consumed = sum(item["self_consumed_kwh"] for item in totals.values())
+    raw_exported = sum(item["exported_kwh"] for item in totals.values())
+    target_self_consumed = max(0.0, float(official_self_consumed_kwh or raw_self_consumed))
+    target_exported = max(0.0, float(official_exported_kwh or raw_exported))
+    self_scale = target_self_consumed / raw_self_consumed if raw_self_consumed > 0 else 1.0
+    export_scale = target_exported / raw_exported if raw_exported > 0 else 1.0
+
+    total_feed_in_revenue = 0.0
+    total_self_use_export_equivalent = 0.0
+    for meter_totals in totals.values():
+        meter_totals["self_consumed_kwh"] *= self_scale
+        meter_totals["exported_kwh"] *= export_scale
+        total_feed_in_revenue += meter_totals["exported_kwh"] * meter_totals["rate"]
+        total_self_use_export_equivalent += meter_totals["self_consumed_kwh"] * meter_totals["rate"]
+
+    return {
+        "total_feed_in_revenue": total_feed_in_revenue,
+        "total_self_use_export_equivalent": total_self_use_export_equivalent,
+        "weighted_export_rate": (
+            total_feed_in_revenue / target_exported if target_exported > 0 else 0.0
+        ),
+    }
+
+
 def _matches_day_group(dt: datetime, day_group: str) -> bool:
     """Return True when the datetime matches the configured day group."""
     if day_group == "weekdays":
@@ -283,15 +418,12 @@ def calculate_financial_summary(
     end_dt: datetime,
     consumption_items: list[dict[str, Any]] | None = None,
     production_items: list[dict[str, Any]] | None = None,
+    per_meter_production_items: dict[str, list[dict[str, Any]]] | None = None,
 ) -> FinancialSummary:
     """Calculate invoice-style money metrics for one preset period."""
     keys = PERIOD_DATA_KEYS[period_key]
     billing_config = get_billing_config(hass)
-    production_meter_ids = [
-        meter_id
-        for meter_id, meter_types in getattr(coordinator, "meters", [])
-        if "production" in (meter_types or [])
-    ]
+    production_meter_ids = _production_meter_ids(coordinator)
 
     consumption = float(data.get(keys["consumption"], 0) or 0)
     production = float(data.get(keys["production"], 0) or 0)
@@ -360,8 +492,23 @@ def calculate_financial_summary(
     )
     total_costs = subtotal_costs * (1 + float(billing_config.vat_rate or 0.0))
 
-    avg_feed_in_rate = _avg_feed_in_rate(hass, billing_config, production_meter_ids)
-    feed_in_revenue = sold_to_market * avg_feed_in_rate
+    priority_allocation = _allocate_priority_solar(
+        consumption_items or [],
+        per_meter_production_items,
+        _resolve_ordered_feed_in_rates(hass, billing_config, production_meter_ids),
+        solar_to_home,
+        sold_to_market,
+    )
+    avg_feed_in_rate = (
+        float(priority_allocation["weighted_export_rate"])
+        if priority_allocation is not None
+        else _avg_feed_in_rate(hass, billing_config, production_meter_ids)
+    )
+    feed_in_revenue = (
+        float(priority_allocation["total_feed_in_revenue"])
+        if priority_allocation is not None
+        else sold_to_market * avg_feed_in_rate
+    )
 
     self_consumed_savings_base = solar_to_home * (
         float(billing_config.energy_variable_rate or 0.0)
@@ -370,7 +517,11 @@ def calculate_financial_summary(
         + float(billing_config.compensation_fund_rate or 0.0)
     )
     total_self_consumed_savings = self_consumed_savings_base * (1 + float(billing_config.vat_rate or 0.0))
-    self_use_vs_export_value = total_self_consumed_savings - (solar_to_home * avg_feed_in_rate)
+    self_use_vs_export_value = total_self_consumed_savings - (
+        float(priority_allocation["total_self_use_export_equivalent"])
+        if priority_allocation is not None
+        else solar_to_home * avg_feed_in_rate
+    )
 
     avoided_exceedance_kwh = (
         max(0.0, windowed_usage.avoided_exceedance_kwh)
@@ -439,6 +590,7 @@ def build_financial_sensor_payloads(
             period_input["end"],
             period_input.get("consumption_items"),
             period_input.get("production_items"),
+            period_input.get("per_meter_production_items"),
         )
 
     for sensor_key, (period_key, metric_name) in FINANCIAL_SENSOR_MAP.items():

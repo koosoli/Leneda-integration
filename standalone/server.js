@@ -192,7 +192,7 @@ function metersOfType(creds, meterType) {
 }
 
 function meterForObis(obisCode, creds) {
-  const consumptionMeters = metersOfType(creds, "consumption");
+  const consumptionMeters = billingConsumptionMeters(creds);
   const productionMeters = metersOfType(creds, "production");
   const gasMeters = metersOfType(creds, "gas");
 
@@ -209,12 +209,20 @@ function meterForObis(obisCode, creds) {
   return consumptionMeters[0] || productionMeters[0] || gasMeters[0] || "";
 }
 
+function billingConsumptionMeters(creds) {
+  const consumptionMeters = metersOfType(creds, "consumption");
+  return consumptionMeters.length > 0 ? [consumptionMeters[0]] : [];
+}
+
 function metersForObis(obisCode, creds) {
   if (obisCode.startsWith("7-")) return metersOfType(creds, "gas");
   if (/^1-1:2\./.test(obisCode) || /^1-1:4\./.test(obisCode) || /^1-65:2\./.test(obisCode)) {
     return metersOfType(creds, "production");
   }
-  return metersOfType(creds, "consumption");
+  // For supplier-style invoice totals, use the primary billing consumption meter.
+  // Auxiliary PV-side consumption meters can add small amounts that do not belong
+  // to the household supplier invoice.
+  return billingConsumptionMeters(creds);
 }
 
 async function lenedaFetch(endpoint, creds) {
@@ -236,7 +244,12 @@ async function lenedaFetch(endpoint, creds) {
 
 function dateRangeFor(range) {
   const now = new Date();
-  const toDate = (value) => value.toISOString().slice(0, 10);
+  const toDate = (value) => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   switch (range) {
     case "yesterday": {
@@ -398,7 +411,7 @@ function getReferencePowerForDate(billingConfig, date) {
 }
 
 async function computePeakAndExceedance(billingConfig, creds, startIso, endIso) {
-  const consumptionMeters = metersOfType(creds, "consumption");
+  const consumptionMeters = billingConsumptionMeters(creds);
   const productionMeters = metersOfType(creds, "production");
 
   if (!consumptionMeters.length) {
@@ -440,7 +453,7 @@ async function fetchLiveAggregatedData(billingConfig, creds, startDate, endDate)
   const aggregationLevel = (new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) > (35 * 24 * 60 * 60 * 1000)
     ? "Month"
     : "Infinite";
-  const consumptionMeters = metersOfType(creds, "consumption");
+  const consumptionMeters = billingConsumptionMeters(creds);
   const productionMeters = metersOfType(creds, "production");
   const gasMeters = metersOfType(creds, "gas");
 
@@ -545,9 +558,7 @@ async function handleApi(req, res, urlPath, searchParams) {
     }
 
     try {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const date = yesterday.toISOString().slice(0, 10);
+      const date = dateRangeFor("yesterday").start;
       await lenedaFetch(
         `/api/metering-points/${firstMeterId}/time-series/aggregated?obisCode=1-1:1.29.0&startDate=${date}&endDate=${date}&aggregationLevel=Infinite&transformationMode=Accumulation`,
         testCreds,
