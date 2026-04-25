@@ -1,4 +1,9 @@
-import type { AppState } from "./App";
+import type {
+  AnalysisComparisonMode,
+  AnalysisHeatmapMetric,
+  AnalysisProfileMetric,
+  AppState,
+} from "./App";
 import { RANGES } from "./Dashboard";
 import type {
   BillingConfig,
@@ -15,6 +20,17 @@ const HEATMAP_LABELS = {
   house: "Total Usage",
   grid: "Net Grid",
   solar: "Solar Production",
+  exceedance_kwh: "Exceedance kWh",
+  exceedance_frequency: "Exceedance Rate",
+} as const;
+const PROFILE_LABELS: Record<AnalysisProfileMetric, string> = {
+  house: "Total Usage",
+  grid: "Net Grid",
+  solar: "Solar Production",
+};
+const COMPARISON_MODE_LABELS: Record<AnalysisComparisonMode, string> = {
+  previous: "Previous Period",
+  last_year: "Last Year",
 } as const;
 
 interface IntervalPoint {
@@ -52,6 +68,7 @@ interface DailyBucket {
   exceedanceCost: number;
   avoidedExceedanceValue: number;
   solarValue: number;
+  netValue: number;
   coveragePct: number;
   selfConsumedPct: number;
   peakGridKw: number;
@@ -74,6 +91,7 @@ interface AnalyticsTotals {
   exceedanceCost: number;
   avoidedExceedanceValue: number;
   solarValue: number;
+  netValue: number;
   coveragePct: number;
   selfConsumedPct: number;
   peakGridKw: number;
@@ -81,12 +99,31 @@ interface AnalyticsTotals {
   exceedanceIntervals: number;
 }
 
+interface ProfileBand {
+  lower: number[];
+  median: number[];
+  upper: number[];
+}
+
+interface HourOpportunityBucket {
+  label: string;
+  importCost: number;
+  exportSpreadValue: number;
+  gridKwh: number;
+  exportKwh: number;
+}
+
 interface AnalyticsBundle {
+  points: IntervalPoint[];
   daily: DailyBucket[];
   totals: AnalyticsTotals;
   topExceedances: IntervalPoint[];
+  peakIntervals: IntervalPoint[];
   hourlyExceedanceKwh: number[];
-  heatmapValues: Record<"house" | "grid" | "solar", number[][]>;
+  heatmapValues: Record<AnalysisHeatmapMetric, number[][]>;
+  intradayProfiles: Record<AnalysisProfileMetric, Record<"weekday" | "weekend", ProfileBand>>;
+  intradayLabels: string[];
+  hourlyOpportunity: HourOpportunityBucket[];
   loadDurationGrossKw: number[];
   loadDurationNetKw: number[];
   worstDays: DailyBucket[];
@@ -128,6 +165,24 @@ function minOr(values: number[], fallback = 0): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function quantile(values: number[], q: number): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const clampedQ = clamp(q, 0, 1);
+  const index = (sorted.length - 1) * clampedQ;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+  if (lowerIndex === upperIndex) return sorted[lowerIndex];
+  const weight = index - lowerIndex;
+  return sorted[lowerIndex] * (1 - weight) + sorted[upperIndex] * weight;
+}
+
+function slotLabel(slot: number): string {
+  const hour = Math.floor(slot / 4);
+  const minute = (slot % 4) * 15;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function formatCurrency(value: number, currency: string): string {
@@ -291,10 +346,25 @@ function buildAnalytics(
   const points = buildIntervalPoints(consumption, production, config);
   const dailyMap = new Map<string, DailyBucket>();
   const hourlyExceedanceKwh = Array.from({ length: 24 }, () => 0);
+  const hourlyOpportunity: HourOpportunityBucket[] = Array.from({ length: 24 }, (_, hour) => ({
+    label: `${String(hour).padStart(2, "0")}:00`,
+    importCost: 0,
+    exportSpreadValue: 0,
+    gridKwh: 0,
+    exportKwh: 0,
+  }));
   const heatmapAccumulators = {
     house: Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ sum: 0, count: 0 }))),
     grid: Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ sum: 0, count: 0 }))),
     solar: Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ sum: 0, count: 0 }))),
+    exceedance_kwh: Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ sum: 0, count: 0 }))),
+    exceedance_frequency: Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ sum: 0, count: 0 }))),
+  };
+  const createProfileSlots = () => Array.from({ length: 96 }, () => [] as number[]);
+  const intradayAccumulators: Record<AnalysisProfileMetric, Record<"weekday" | "weekend", number[][]>> = {
+    house: { weekday: createProfileSlots(), weekend: createProfileSlots() },
+    grid: { weekday: createProfileSlots(), weekend: createProfileSlots() },
+    solar: { weekday: createProfileSlots(), weekend: createProfileSlots() },
   };
 
   const totals: AnalyticsTotals = {
@@ -312,6 +382,7 @@ function buildAnalytics(
     exceedanceCost: 0,
     avoidedExceedanceValue: 0,
     solarValue: 0,
+    netValue: 0,
     coveragePct: 0,
     selfConsumedPct: 0,
     peakGridKw: 0,
@@ -342,6 +413,7 @@ function buildAnalytics(
         exceedanceCost: 0,
         avoidedExceedanceValue: 0,
         solarValue: 0,
+        netValue: 0,
         coveragePct: 0,
         selfConsumedPct: 0,
         peakGridKw: 0,
@@ -363,6 +435,7 @@ function buildAnalytics(
     const selfConsumptionAdvantage = solarToHomeKwh * (point.importRateWithVat - point.feedInRate);
     const exceedanceCost = exceedanceKwh * point.exceedanceRateWithVat;
     const avoidedExceedanceValue = avoidedExceedanceKwh * point.exceedanceRateWithVat;
+    const netValue = solarSavings + exportRevenue + avoidedExceedanceValue - importCost - exceedanceCost;
 
     bucket.houseKwh += houseKwh;
     bucket.solarKwh += solarKwh;
@@ -377,6 +450,7 @@ function buildAnalytics(
     bucket.selfConsumptionAdvantage += selfConsumptionAdvantage;
     bucket.exceedanceCost += exceedanceCost;
     bucket.avoidedExceedanceValue += avoidedExceedanceValue;
+    bucket.netValue += netValue;
     bucket.peakGridKw = Math.max(bucket.peakGridKw, point.gridKw);
     bucket.peakHouseKw = Math.max(bucket.peakHouseKw, point.houseKw);
     bucket.exceedanceIntervals += point.overKw > 0 ? 1 : 0;
@@ -395,19 +469,35 @@ function buildAnalytics(
     totals.selfConsumptionAdvantage += selfConsumptionAdvantage;
     totals.exceedanceCost += exceedanceCost;
     totals.avoidedExceedanceValue += avoidedExceedanceValue;
+    totals.netValue += netValue;
     totals.peakGridKw = Math.max(totals.peakGridKw, point.gridKw);
     totals.peakHouseKw = Math.max(totals.peakHouseKw, point.houseKw);
     totals.exceedanceIntervals += point.overKw > 0 ? 1 : 0;
 
     const weekdayIndex = (point.date.getDay() + 6) % 7;
     const hour = point.date.getHours();
+    const slot = hour * 4 + Math.floor(point.date.getMinutes() / 15);
+    const dayType = point.date.getDay() === 0 || point.date.getDay() === 6 ? "weekend" : "weekday";
     heatmapAccumulators.house[weekdayIndex][hour].sum += point.houseKw;
     heatmapAccumulators.house[weekdayIndex][hour].count += 1;
     heatmapAccumulators.grid[weekdayIndex][hour].sum += point.gridKw;
     heatmapAccumulators.grid[weekdayIndex][hour].count += 1;
     heatmapAccumulators.solar[weekdayIndex][hour].sum += point.solarKw;
     heatmapAccumulators.solar[weekdayIndex][hour].count += 1;
+    heatmapAccumulators.exceedance_kwh[weekdayIndex][hour].sum += exceedanceKwh;
+    heatmapAccumulators.exceedance_kwh[weekdayIndex][hour].count += 1;
+    heatmapAccumulators.exceedance_frequency[weekdayIndex][hour].sum += point.overKw > 0 ? 1 : 0;
+    heatmapAccumulators.exceedance_frequency[weekdayIndex][hour].count += 1;
     hourlyExceedanceKwh[hour] += exceedanceKwh;
+
+    intradayAccumulators.house[dayType][slot].push(point.houseKw);
+    intradayAccumulators.grid[dayType][slot].push(point.gridKw);
+    intradayAccumulators.solar[dayType][slot].push(point.solarKw);
+
+    hourlyOpportunity[hour].importCost += importCost;
+    hourlyOpportunity[hour].exportSpreadValue += exportKwh * Math.max(point.importRateWithVat - point.feedInRate, 0);
+    hourlyOpportunity[hour].gridKwh += gridKwh;
+    hourlyOpportunity[hour].exportKwh += exportKwh;
   }
 
   const daily = [...dailyMap.values()]
@@ -427,11 +517,57 @@ function buildAnalytics(
     house: heatmapAccumulators.house.map((row) => row.map((cell) => (cell.count ? cell.sum / cell.count : 0))),
     grid: heatmapAccumulators.grid.map((row) => row.map((cell) => (cell.count ? cell.sum / cell.count : 0))),
     solar: heatmapAccumulators.solar.map((row) => row.map((cell) => (cell.count ? cell.sum / cell.count : 0))),
+    exceedance_kwh: heatmapAccumulators.exceedance_kwh.map((row) => row.map((cell) => cell.sum)),
+    exceedance_frequency: heatmapAccumulators.exceedance_frequency.map((row) =>
+      row.map((cell) => (cell.count ? (cell.sum / cell.count) * 100 : 0)),
+    ),
+  };
+  const intradayLabels = Array.from({ length: 96 }, (_, slot) => slotLabel(slot));
+  const intradayProfiles: AnalyticsBundle["intradayProfiles"] = {
+    house: {
+      weekday: {
+        lower: intradayAccumulators.house.weekday.map((values) => quantile(values, 0.1)),
+        median: intradayAccumulators.house.weekday.map((values) => quantile(values, 0.5)),
+        upper: intradayAccumulators.house.weekday.map((values) => quantile(values, 0.9)),
+      },
+      weekend: {
+        lower: intradayAccumulators.house.weekend.map((values) => quantile(values, 0.1)),
+        median: intradayAccumulators.house.weekend.map((values) => quantile(values, 0.5)),
+        upper: intradayAccumulators.house.weekend.map((values) => quantile(values, 0.9)),
+      },
+    },
+    grid: {
+      weekday: {
+        lower: intradayAccumulators.grid.weekday.map((values) => quantile(values, 0.1)),
+        median: intradayAccumulators.grid.weekday.map((values) => quantile(values, 0.5)),
+        upper: intradayAccumulators.grid.weekday.map((values) => quantile(values, 0.9)),
+      },
+      weekend: {
+        lower: intradayAccumulators.grid.weekend.map((values) => quantile(values, 0.1)),
+        median: intradayAccumulators.grid.weekend.map((values) => quantile(values, 0.5)),
+        upper: intradayAccumulators.grid.weekend.map((values) => quantile(values, 0.9)),
+      },
+    },
+    solar: {
+      weekday: {
+        lower: intradayAccumulators.solar.weekday.map((values) => quantile(values, 0.1)),
+        median: intradayAccumulators.solar.weekday.map((values) => quantile(values, 0.5)),
+        upper: intradayAccumulators.solar.weekday.map((values) => quantile(values, 0.9)),
+      },
+      weekend: {
+        lower: intradayAccumulators.solar.weekend.map((values) => quantile(values, 0.1)),
+        median: intradayAccumulators.solar.weekend.map((values) => quantile(values, 0.5)),
+        upper: intradayAccumulators.solar.weekend.map((values) => quantile(values, 0.9)),
+      },
+    },
   };
 
   const topExceedances = points
     .filter((point) => point.overKw > 0)
     .sort((a, b) => b.overKw - a.overKw || b.timestamp - a.timestamp)
+    .slice(0, 8);
+  const peakIntervals = [...points]
+    .sort((a, b) => b.houseKw - a.houseKw || b.timestamp - a.timestamp)
     .slice(0, 8);
 
   const worstDays = [...daily]
@@ -440,11 +576,16 @@ function buildAnalytics(
     .slice(0, 6);
 
   return {
+    points,
     daily,
     totals,
     topExceedances,
+    peakIntervals,
     hourlyExceedanceKwh,
     heatmapValues,
+    intradayProfiles,
+    intradayLabels,
+    hourlyOpportunity,
     loadDurationGrossKw: points.map((point) => point.houseKw).sort((a, b) => b - a),
     loadDurationNetKw: points.map((point) => point.gridKw).sort((a, b) => b - a),
     worstDays,
@@ -469,8 +610,54 @@ function rangeSubtitle(state: AppState): string {
 }
 
 function comparisonLabel(state: AppState): string {
-  if (!state.analysisComparison) return "Previous matched period";
-  return `Previous matched period: ${fmtDateLong(state.analysisComparison.start)} - ${fmtDateLong(state.analysisComparison.end)}`;
+  const baseLabel = state.analysisComparisonMode === "last_year"
+    ? "Same period last year"
+    : "Previous matched period";
+  if (!state.analysisComparison) return baseLabel;
+  return `${baseLabel}: ${fmtDateLong(state.analysisComparison.start)} - ${fmtDateLong(state.analysisComparison.end)}`;
+}
+
+function heatmapMetricCopy(metric: AnalysisHeatmapMetric): { description: string; note: string } {
+  switch (metric) {
+    case "house":
+      return {
+        description: "Average hourly power by weekday for total house usage.",
+        note: "Each cell shows the average kW seen in that weekday/hour slot over the selected period.",
+      };
+    case "grid":
+      return {
+        description: "Average hourly power by weekday for remaining grid draw after solar.",
+        note: "Each cell shows the average net-grid kW seen in that weekday/hour slot over the selected period.",
+      };
+    case "solar":
+      return {
+        description: "Average hourly power by weekday for solar production.",
+        note: "Each cell shows the average solar kW seen in that weekday/hour slot over the selected period.",
+      };
+    case "exceedance_kwh":
+      return {
+        description: "Cumulative exceedance energy by weekday and hour, showing where the reference limit hurt the most.",
+        note: "Each cell shows cumulative exceedance kWh recorded in that weekday/hour slot over the selected period.",
+      };
+    case "exceedance_frequency":
+      return {
+        description: "How often each weekday/hour slot went over the reference limit.",
+        note: "Each cell shows the share of 15-minute intervals in that weekday/hour slot that exceeded the reference limit.",
+      };
+  }
+}
+
+function formatHeatmapCellValue(metric: AnalysisHeatmapMetric, value: number): string {
+  switch (metric) {
+    case "house":
+    case "grid":
+    case "solar":
+      return `${fmtNum(value, 2)} kW average`;
+    case "exceedance_kwh":
+      return `${fmtNum(value, 2)} kWh`;
+    case "exceedance_frequency":
+      return `${fmtNum(value, 0)}% of intervals`;
+  }
 }
 
 function renderLineChart(options: {
@@ -591,6 +778,175 @@ function renderLineChart(options: {
   `;
 }
 
+function renderBandChart(options: {
+  title?: string;
+  labels: string[];
+  series: Array<{
+    label: string;
+    color: string;
+    fill: string;
+    band: ProfileBand;
+    dashed?: boolean;
+  }>;
+  valueFormatter?: (value: number) => string;
+}): string {
+  const series = options.series.filter((entry) => entry.band.median.length > 0);
+  if (!series.length) {
+    return `<div class="analysis-empty">No profile data available for this period.</div>`;
+  }
+
+  const pointCount = Math.max(...series.map((entry) => entry.band.median.length));
+  const width = Math.max(760, pointCount * 12 + 92);
+  const height = 248;
+  const padLeft = 50;
+  const padRight = 20;
+  const padTop = 18;
+  const padBottom = 30;
+  const allValues = series.flatMap((entry) => [...entry.band.lower, ...entry.band.median, ...entry.band.upper]);
+  const minValue = Math.min(0, minOr(allValues, 0));
+  let maxValue = maxOr(allValues, 1);
+  if (maxValue <= minValue) maxValue = minValue + 1;
+
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+  const xForIndex = (index: number, length: number): number =>
+    length <= 1 ? padLeft + plotWidth / 2 : padLeft + (index * plotWidth) / (length - 1);
+  const yForValue = (value: number): number =>
+    padTop + ((maxValue - value) / (maxValue - minValue)) * plotHeight;
+  const valueFormatter = options.valueFormatter ?? ((value: number) => fmtNum(value, 1));
+  const tickValues = Array.from({ length: 4 }, (_, index) => minValue + ((maxValue - minValue) / 3) * index);
+  const labelIndexes = [0, 16, 32, 48, 64, 80, pointCount - 1]
+    .filter((index, position, array) => index >= 0 && index < pointCount && array.indexOf(index) === position);
+
+  const gridMarkup = tickValues.map((value) => {
+    const y = yForValue(value);
+    return `
+      <line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${(width - padRight).toFixed(1)}" y2="${y.toFixed(1)}" class="analysis-svg-grid" />
+      <text x="${padLeft - 8}" y="${(y + 4).toFixed(1)}" class="analysis-svg-tick">${valueFormatter(value)}</text>
+    `;
+  }).join("");
+
+  const seriesMarkup = series.map((entry) => {
+    const upperPath = entry.band.upper.map((value, index) => {
+      const x = xForIndex(index, entry.band.upper.length);
+      const y = yForValue(value);
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(" ");
+    const lowerPath = [...entry.band.lower].reverse().map((value, reverseIndex) => {
+      const index = entry.band.lower.length - 1 - reverseIndex;
+      const x = xForIndex(index, entry.band.lower.length);
+      const y = yForValue(value);
+      return `L ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(" ");
+    const medianPath = entry.band.median.map((value, index) => {
+      const x = xForIndex(index, entry.band.median.length);
+      const y = yForValue(value);
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(" ");
+
+    return `
+      <path d="${upperPath} ${lowerPath} Z" fill="${entry.fill}" stroke="none" />
+      <path d="${medianPath}" fill="none" stroke="${entry.color}" stroke-width="2.4" ${entry.dashed ? 'stroke-dasharray="6 4"' : ""} />
+    `;
+  }).join("");
+
+  const xLabelMarkup = labelIndexes.map((index) => {
+    const x = xForIndex(index, pointCount);
+    const label = options.labels[index] ?? `Point ${index + 1}`;
+    return `<text x="${x.toFixed(1)}" y="${height - 8}" text-anchor="middle" class="analysis-svg-x-label">${label}</text>`;
+  }).join("");
+
+  return `
+    <div class="analysis-chart-scroller">
+      <svg class="analysis-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${options.title ?? "Band chart"}">
+        ${gridMarkup}
+        ${seriesMarkup}
+        ${xLabelMarkup}
+      </svg>
+    </div>
+    <div class="analysis-chart-legend">
+      ${series.map((entry) => `
+        <span class="analysis-legend-item">
+          <span class="analysis-legend-swatch" style="background:${entry.color};"></span>
+          <span>${entry.label}</span>
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function peakLabel(point: IntervalPoint): { date: string; time: string } {
+  const date = new Date(point.timestamp);
+  return {
+    date: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    time: date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+  };
+}
+
+function renderPeakAnatomyChart(points: IntervalPoint[]): string {
+  if (!points.length) {
+    return `<div class="analysis-empty">No peak intervals available for this period.</div>`;
+  }
+
+  const width = Math.max(760, points.length * 86 + 96);
+  const height = 276;
+  const padLeft = 52;
+  const padRight = 16;
+  const padTop = 18;
+  const padBottom = 54;
+  const maxPositive = maxOr(points.map((point) => point.houseKw), 1);
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+  const baseline = padTop + plotHeight;
+  const step = plotWidth / points.length;
+  const barWidth = Math.max(22, Math.min(38, step * 0.54));
+
+  const bars = points.map((point, index) => {
+    const x = padLeft + index * step + (step - barWidth) / 2;
+    const solarHeight = (point.solarToHomeKw / maxPositive) * plotHeight;
+    const gridWithinReferenceKw = Math.max(0, Math.min(point.gridKw, point.referenceKw));
+    const gridWithinHeight = (gridWithinReferenceKw / maxPositive) * plotHeight;
+    const gridOverHeight = (Math.max(0, point.gridKw - point.referenceKw) / maxPositive) * plotHeight;
+
+    return `
+      <g>
+        <rect x="${x.toFixed(1)}" y="${(baseline - solarHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${solarHeight.toFixed(1)}" rx="4" fill="rgba(63, 185, 80, 0.85)" />
+        <rect x="${x.toFixed(1)}" y="${(baseline - solarHeight - gridWithinHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${gridWithinHeight.toFixed(1)}" rx="4" fill="rgba(248, 81, 73, 0.62)" />
+        ${gridOverHeight > 0
+          ? `<rect x="${x.toFixed(1)}" y="${(baseline - solarHeight - gridWithinHeight - gridOverHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${gridOverHeight.toFixed(1)}" rx="4" fill="rgba(210, 153, 34, 0.92)" />`
+          : ""}
+      </g>
+    `;
+  }).join("");
+
+  const labelMarkup = points.map((point, index) => {
+    const x = padLeft + index * step + step / 2;
+    const { date: dateLabel, time: timeLabel } = peakLabel(point);
+    return `
+      <text x="${x.toFixed(1)}" y="${height - 20}" text-anchor="middle" class="analysis-svg-x-label">
+        <tspan x="${x.toFixed(1)}" dy="0">${dateLabel}</tspan>
+        <tspan x="${x.toFixed(1)}" dy="12">${timeLabel}</tspan>
+      </text>
+    `;
+  }).join("");
+
+  return `
+    <div class="analysis-chart-scroller">
+      <svg class="analysis-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Peak interval anatomy">
+        <line x1="${padLeft}" y1="${baseline.toFixed(1)}" x2="${(width - padRight).toFixed(1)}" y2="${baseline.toFixed(1)}" class="analysis-svg-axis" />
+        <text x="${padLeft - 8}" y="${(padTop + 4).toFixed(1)}" class="analysis-svg-tick">${fmtNum(maxPositive, 1)} kW</text>
+        ${bars}
+        ${labelMarkup}
+      </svg>
+    </div>
+    <div class="analysis-chart-legend">
+      <span class="analysis-legend-item"><span class="analysis-legend-swatch" style="background:rgba(63, 185, 80, 0.85);"></span><span>Covered by solar</span></span>
+      <span class="analysis-legend-item"><span class="analysis-legend-swatch" style="background:rgba(248, 81, 73, 0.62);"></span><span>Grid within reference</span></span>
+      <span class="analysis-legend-item"><span class="analysis-legend-swatch" style="background:rgba(210, 153, 34, 0.92);"></span><span>Grid over reference</span></span>
+    </div>
+  `;
+}
+
 function renderDailyFlowChart(daily: DailyBucket[]): string {
   if (!daily.length) {
     return `<div class="analysis-empty">No daily energy data available.</div>`;
@@ -661,14 +1017,17 @@ function renderDailyFlowChart(daily: DailyBucket[]): string {
   `;
 }
 
-function heatmapColor(metric: "house" | "grid" | "solar", intensity: number): string {
+function heatmapColor(metric: AnalysisHeatmapMetric, intensity: number): string {
   const clamped = clamp(intensity, 0, 1);
   if (metric === "solar") return `rgba(63, 185, 80, ${0.12 + clamped * 0.82})`;
+  if (metric === "exceedance_kwh" || metric === "exceedance_frequency") {
+    return `rgba(210, 153, 34, ${0.14 + clamped * 0.82})`;
+  }
   if (metric === "grid") return `rgba(210, 153, 34, ${0.12 + clamped * 0.82})`;
   return `rgba(248, 81, 73, ${0.12 + clamped * 0.82})`;
 }
 
-function renderHeatmap(matrix: number[][], metric: "house" | "grid" | "solar"): string {
+function renderHeatmap(matrix: number[][], metric: AnalysisHeatmapMetric): string {
   const values = matrix.flat();
   const maxValue = maxOr(values, 1);
   const minValue = minOr(values, 0);
@@ -690,8 +1049,8 @@ function renderHeatmap(matrix: number[][], metric: "house" | "grid" | "solar"): 
               <span
                 class="analysis-heatmap-cell"
                 style="background:${heatmapColor(metric, normalized)};"
-                title="${WEEKDAY_LABELS[weekdayIndex]} ${String(hour).padStart(2, "0")}:00 - ${fmtNum(value, 2)} kW average"
-              >${value > 0.05 ? fmtNum(value, 1) : ""}</span>
+                title="${WEEKDAY_LABELS[weekdayIndex]} ${String(hour).padStart(2, "0")}:00 - ${formatHeatmapCellValue(metric, value)}"
+              >${value > (metric === "exceedance_frequency" ? 1 : 0.05) ? fmtNum(value, metric === "exceedance_frequency" ? 0 : 1) : ""}</span>
             `;
           }).join("")}
         </div>
@@ -843,21 +1202,88 @@ function renderDailyBreakdownCard(analytics: AnalyticsBundle): string {
 }
 
 function renderHeatmapCard(state: AppState, analytics: AnalyticsBundle): string {
+  const metricCopy = heatmapMetricCopy(state.analysisHeatmapMetric);
+
   return `
     <div class="card analysis-card">
       <div class="analysis-card-header">
         <div>
           <h3 class="card-title">Consumption Pattern Heatmap</h3>
-          <p class="analysis-card-copy">Average hourly power by weekday. Use the switch to inspect total house usage, remaining grid draw, or solar production.</p>
+          <p class="analysis-card-copy">${metricCopy.description}</p>
         </div>
         <div class="chart-unit-toggle">
           <button class="unit-btn ${state.analysisHeatmapMetric === "house" ? "active" : ""}" data-analysis-heatmap="house">${HEATMAP_LABELS.house}</button>
           <button class="unit-btn ${state.analysisHeatmapMetric === "grid" ? "active" : ""}" data-analysis-heatmap="grid">${HEATMAP_LABELS.grid}</button>
           <button class="unit-btn ${state.analysisHeatmapMetric === "solar" ? "active" : ""}" data-analysis-heatmap="solar">${HEATMAP_LABELS.solar}</button>
+          <button class="unit-btn ${state.analysisHeatmapMetric === "exceedance_kwh" ? "active" : ""}" data-analysis-heatmap="exceedance_kwh">${HEATMAP_LABELS.exceedance_kwh}</button>
+          <button class="unit-btn ${state.analysisHeatmapMetric === "exceedance_frequency" ? "active" : ""}" data-analysis-heatmap="exceedance_frequency">${HEATMAP_LABELS.exceedance_frequency}</button>
         </div>
       </div>
       ${renderHeatmap(analytics.heatmapValues[state.analysisHeatmapMetric], state.analysisHeatmapMetric)}
-      <p class="analysis-note">Each cell shows the average kW seen in that weekday/hour slot over the selected period.</p>
+      <p class="analysis-note">${metricCopy.note}</p>
+    </div>
+  `;
+}
+
+function renderIntradayProfileCard(state: AppState, analytics: AnalyticsBundle): string {
+  const metric = state.analysisProfileMetric;
+  const profile = analytics.intradayProfiles[metric];
+  const label = PROFILE_LABELS[metric];
+  const weekdayPeakIndex = profile.weekday.median.reduce(
+    (bestIndex, value, index, values) => value > values[bestIndex] ? index : bestIndex,
+    0,
+  );
+  const weekendPeakIndex = profile.weekend.median.reduce(
+    (bestIndex, value, index, values) => value > values[bestIndex] ? index : bestIndex,
+    0,
+  );
+
+  return `
+    <div class="card analysis-card">
+      <div class="analysis-card-header">
+        <div>
+          <h3 class="card-title">Intraday Profile</h3>
+          <p class="analysis-card-copy">A typical day view for ${label.toLowerCase()}, split between weekdays and weekends. The band shows the p10 to p90 range and the line is the median interval.</p>
+        </div>
+        <div class="chart-unit-toggle">
+          <button class="unit-btn ${metric === "house" ? "active" : ""}" data-analysis-profile="house">${PROFILE_LABELS.house}</button>
+          <button class="unit-btn ${metric === "grid" ? "active" : ""}" data-analysis-profile="grid">${PROFILE_LABELS.grid}</button>
+          <button class="unit-btn ${metric === "solar" ? "active" : ""}" data-analysis-profile="solar">${PROFILE_LABELS.solar}</button>
+        </div>
+      </div>
+      <div class="analysis-inline-metrics">
+        <div>
+          <span class="analysis-inline-label">Weekday median peak</span>
+          <strong>${fmtNum(profile.weekday.median[weekdayPeakIndex] ?? 0, 2)} kW</strong>
+          <span class="analysis-stat-meta">${analytics.intradayLabels[weekdayPeakIndex] ?? "n/a"}</span>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Weekend median peak</span>
+          <strong>${fmtNum(profile.weekend.median[weekendPeakIndex] ?? 0, 2)} kW</strong>
+          <span class="analysis-stat-meta">${analytics.intradayLabels[weekendPeakIndex] ?? "n/a"}</span>
+        </div>
+      </div>
+      ${renderBandChart({
+        title: `${label} intraday profile`,
+        labels: analytics.intradayLabels,
+        series: [
+          {
+            label: "Weekday median (p10-p90 band)",
+            color: "#58a6ff",
+            fill: "rgba(88, 166, 255, 0.14)",
+            band: profile.weekday,
+          },
+          {
+            label: "Weekend median (p10-p90 band)",
+            color: "#d29922",
+            fill: "rgba(210, 153, 34, 0.13)",
+            band: profile.weekend,
+            dashed: true,
+          },
+        ],
+        valueFormatter: (value) => `${fmtNum(value, 1)} kW`,
+      })}
+      <p class="analysis-note">This makes the typical daily rhythm much easier to read than the weekday/hour heatmap alone.</p>
     </div>
   `;
 }
@@ -924,6 +1350,85 @@ function renderSolarCoverageCard(analytics: AnalyticsBundle, currency: string): 
           valueFormatter: (value) => formatCurrency(value, currency),
         })}
       </div>
+    </div>
+  `;
+}
+
+function renderTariffOpportunityCard(analytics: AnalyticsBundle, currency: string): string {
+  const highestImportHour = [...analytics.hourlyOpportunity]
+    .sort((a, b) => b.importCost - a.importCost)[0];
+  const highestSpreadHour = [...analytics.hourlyOpportunity]
+    .sort((a, b) => b.exportSpreadValue - a.exportSpreadValue)[0];
+  const importHours = [...analytics.hourlyOpportunity]
+    .filter((hour) => hour.importCost > 0)
+    .sort((a, b) => b.importCost - a.importCost)
+    .slice(0, 5)
+    .map((hour) => ({
+      label: hour.label,
+      value: hour.importCost,
+      meta: `${formatCurrency(hour.importCost, currency)} from ${fmtNum(hour.gridKwh, 1)} kWh`,
+    }));
+  const exportHours = [...analytics.hourlyOpportunity]
+    .filter((hour) => hour.exportSpreadValue > 0)
+    .sort((a, b) => b.exportSpreadValue - a.exportSpreadValue)
+    .slice(0, 5)
+    .map((hour) => ({
+      label: hour.label,
+      value: hour.exportSpreadValue,
+      meta: `${formatCurrency(hour.exportSpreadValue, currency)} on ${fmtNum(hour.exportKwh, 1)} kWh`,
+      colorClass: "analysis-progress-fill-warn",
+    }));
+
+  return `
+    <div class="card analysis-card">
+      <div class="analysis-card-header">
+        <div>
+          <h3 class="card-title">Tariff Opportunity by Hour</h3>
+          <p class="analysis-card-copy">This highlights when imported energy cost you the most and when exported surplus had the biggest value gap versus self-use. It is a practical view for load shifting or storage sizing.</p>
+        </div>
+      </div>
+      <div class="analysis-inline-metrics">
+        <div>
+          <span class="analysis-inline-label">Total import pressure</span>
+          <strong>${formatCurrency(analytics.hourlyOpportunity.reduce((sum, hour) => sum + hour.importCost, 0), currency)}</strong>
+          <span class="analysis-stat-meta">Variable import cost grouped by hour of day</span>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Export spread opportunity</span>
+          <strong>${formatCurrency(analytics.hourlyOpportunity.reduce((sum, hour) => sum + hour.exportSpreadValue, 0), currency)}</strong>
+          <span class="analysis-stat-meta">Approximate value gap between export and local use</span>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Hardest import hour</span>
+          <strong>${highestImportHour?.label ?? "n/a"}</strong>
+          <span class="analysis-stat-meta">${highestImportHour ? formatCurrency(highestImportHour.importCost, currency) : "No import cost recorded"}</span>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Best storage hour</span>
+          <strong>${highestSpreadHour?.label ?? "n/a"}</strong>
+          <span class="analysis-stat-meta">${highestSpreadHour ? formatCurrency(highestSpreadHour.exportSpreadValue, currency) : "No export spread recorded"}</span>
+        </div>
+      </div>
+      ${renderLineChart({
+        title: "Hourly tariff opportunity",
+        series: [
+          { label: "Import cost pressure", color: "#f85149", values: analytics.hourlyOpportunity.map((hour) => hour.importCost) },
+          { label: "Export spread opportunity", color: "#58a6ff", values: analytics.hourlyOpportunity.map((hour) => hour.exportSpreadValue) },
+        ],
+        labels: analytics.hourlyOpportunity.map((hour) => hour.label),
+        valueFormatter: (value) => formatCurrency(value, currency),
+      })}
+      <div class="analysis-subgrid">
+        <div>
+          <h4 class="analysis-subtitle">Most expensive import hours</h4>
+          ${renderProgressBars(importHours)}
+        </div>
+        <div>
+          <h4 class="analysis-subtitle">Best export-to-storage hours</h4>
+          ${renderProgressBars(exportHours)}
+        </div>
+      </div>
+      <p class="analysis-note">Export spread opportunity uses the difference between the import rate and feed-in rate for exported energy in that hour, so it is a directional indicator rather than a billing line item.</p>
     </div>
   `;
 }
@@ -1013,11 +1518,50 @@ function renderReferenceCard(analytics: AnalyticsBundle, currency: string): stri
   `;
 }
 
+function renderPeakAnatomyCard(analytics: AnalyticsBundle): string {
+  const solarShareAcrossPeaks = analytics.peakIntervals.length
+    ? analytics.peakIntervals.reduce((sum, point) => sum + (point.houseKw > 0 ? (point.solarToHomeKw / point.houseKw) * 100 : 0), 0) / analytics.peakIntervals.length
+    : 0;
+
+  return `
+    <div class="card analysis-card analysis-card-full">
+      <div class="analysis-card-header">
+        <div>
+          <h3 class="card-title">Peak Interval Anatomy</h3>
+          <p class="analysis-card-copy">The highest house-load intervals are broken into solar-covered demand, grid demand that stayed inside the reference window, and the part that still spilled over it.</p>
+        </div>
+      </div>
+      <div class="analysis-inline-metrics">
+        <div>
+          <span class="analysis-inline-label">Highest gross peak</span>
+          <strong>${fmtNum(maxOr(analytics.peakIntervals.map((point) => point.houseKw), 0), 2)} kW</strong>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Highest net-grid peak</span>
+          <strong>${fmtNum(maxOr(analytics.peakIntervals.map((point) => point.gridKw), 0), 2)} kW</strong>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Solar share across peaks</span>
+          <strong>${fmtNum(solarShareAcrossPeaks, 0)}%</strong>
+        </div>
+        <div>
+          <span class="analysis-inline-label">Intervals over reference</span>
+          <strong>${fmtNum(analytics.peakIntervals.filter((point) => point.overKw > 0).length, 0)} / ${fmtNum(analytics.peakIntervals.length, 0)}</strong>
+        </div>
+      </div>
+      ${renderPeakAnatomyChart(analytics.peakIntervals)}
+      <p class="analysis-note">A gold cap only appears when the grid portion of the interval exceeded the configured reference power.</p>
+    </div>
+  `;
+}
+
 function renderComparisonCard(
   current: AnalyticsBundle,
   state: AppState,
   config: BillingConfig,
 ): string {
+  const comparisonSeriesLabel = state.analysisComparisonMode === "last_year" ? "Last year" : "Previous";
+
   if (state.analysisComparisonLoading) {
     return `
       <div class="card analysis-card">
@@ -1025,6 +1569,10 @@ function renderComparisonCard(
           <div>
             <h3 class="card-title">Period Comparison</h3>
             <p class="analysis-card-copy">${comparisonLabel(state)}</p>
+          </div>
+          <div class="chart-unit-toggle">
+            <button class="unit-btn ${state.analysisComparisonMode === "previous" ? "active" : ""}" data-analysis-comparison-mode="previous">${COMPARISON_MODE_LABELS.previous}</button>
+            <button class="unit-btn ${state.analysisComparisonMode === "last_year" ? "active" : ""}" data-analysis-comparison-mode="last_year">${COMPARISON_MODE_LABELS.last_year}</button>
           </div>
         </div>
         <div class="analysis-empty">Loading comparison period...</div>
@@ -1038,7 +1586,13 @@ function renderComparisonCard(
         <div class="analysis-card-header">
           <div>
             <h3 class="card-title">Period Comparison</h3>
-            <p class="analysis-card-copy">A matched previous period is shown here when enough historic data is available.</p>
+            <p class="analysis-card-copy">${state.analysisComparisonMode === "last_year"
+              ? "The same calendar period last year is shown here when enough history is available."
+              : "A matched previous period is shown here when enough historic data is available."}</p>
+          </div>
+          <div class="chart-unit-toggle">
+            <button class="unit-btn ${state.analysisComparisonMode === "previous" ? "active" : ""}" data-analysis-comparison-mode="previous">${COMPARISON_MODE_LABELS.previous}</button>
+            <button class="unit-btn ${state.analysisComparisonMode === "last_year" ? "active" : ""}" data-analysis-comparison-mode="last_year">${COMPARISON_MODE_LABELS.last_year}</button>
           </div>
         </div>
         <div class="analysis-empty">Comparison data is unavailable for the selected range.</div>
@@ -1061,36 +1615,40 @@ function renderComparisonCard(
           <h3 class="card-title">Period Comparison</h3>
           <p class="analysis-card-copy">${comparisonLabel(state)}</p>
         </div>
+        <div class="chart-unit-toggle">
+          <button class="unit-btn ${state.analysisComparisonMode === "previous" ? "active" : ""}" data-analysis-comparison-mode="previous">${COMPARISON_MODE_LABELS.previous}</button>
+          <button class="unit-btn ${state.analysisComparisonMode === "last_year" ? "active" : ""}" data-analysis-comparison-mode="last_year">${COMPARISON_MODE_LABELS.last_year}</button>
+        </div>
       </div>
       <div class="analysis-compare-grid">
         <div class="analysis-compare-item">
           <span class="analysis-inline-label">House usage</span>
           <strong>${fmtNum(current.totals.houseKwh)} kWh</strong>
-          <span class="analysis-compare-delta">${formatDelta(current.totals.houseKwh - previous.totals.houseKwh)} kWh vs previous</span>
+          <span class="analysis-compare-delta">${formatDelta(current.totals.houseKwh - previous.totals.houseKwh)} kWh vs ${comparisonSeriesLabel.toLowerCase()}</span>
         </div>
         <div class="analysis-compare-item">
           <span class="analysis-inline-label">Net grid usage</span>
           <strong>${fmtNum(current.totals.gridKwh)} kWh</strong>
-          <span class="analysis-compare-delta">${formatDelta(current.totals.gridKwh - previous.totals.gridKwh)} kWh vs previous</span>
+          <span class="analysis-compare-delta">${formatDelta(current.totals.gridKwh - previous.totals.gridKwh)} kWh vs ${comparisonSeriesLabel.toLowerCase()}</span>
         </div>
         <div class="analysis-compare-item">
           <span class="analysis-inline-label">Solar coverage</span>
           <strong>${fmtNum(current.totals.coveragePct, 1)}%</strong>
-          <span class="analysis-compare-delta">${formatDelta(current.totals.coveragePct - previous.totals.coveragePct)} pts vs previous</span>
+          <span class="analysis-compare-delta">${formatDelta(current.totals.coveragePct - previous.totals.coveragePct)} pts vs ${comparisonSeriesLabel.toLowerCase()}</span>
         </div>
         <div class="analysis-compare-item">
           <span class="analysis-inline-label">Solar value</span>
           <strong>${formatCurrency(current.totals.solarValue, config.currency || "EUR")}</strong>
-          <span class="analysis-compare-delta">${formatDelta(current.totals.solarValue - previous.totals.solarValue, 2)} ${config.currency || "EUR"} vs previous</span>
+          <span class="analysis-compare-delta">${formatDelta(current.totals.solarValue - previous.totals.solarValue, 2)} ${config.currency || "EUR"} vs ${comparisonSeriesLabel.toLowerCase()}</span>
         </div>
       </div>
       <div class="analysis-subchart">
         <h4 class="analysis-subtitle">Usage by day index</h4>
         ${renderLineChart({
-          title: "Current versus previous usage",
+          title: `Current versus ${comparisonSeriesLabel.toLowerCase()} usage`,
           series: [
             { label: "Current", color: "#f85149", values: current.daily.map((day) => day.houseKwh) },
-            { label: "Previous", color: "#58a6ff", values: previous.daily.map((day) => day.houseKwh), dashed: true },
+            { label: comparisonSeriesLabel, color: "#58a6ff", values: previous.daily.map((day) => day.houseKwh), dashed: true },
           ],
           labels: dayIndexLabels,
           valueFormatter: (value) => `${fmtNum(value, 1)} kWh`,
@@ -1099,10 +1657,10 @@ function renderComparisonCard(
       <div class="analysis-subchart">
         <h4 class="analysis-subtitle">Solar value by day index</h4>
         ${renderLineChart({
-          title: "Current versus previous solar value",
+          title: `Current versus ${comparisonSeriesLabel.toLowerCase()} solar value`,
           series: [
             { label: "Current", color: "#3fb950", values: current.daily.map((day) => day.solarValue) },
-            { label: "Previous", color: "#d29922", values: previous.daily.map((day) => day.solarValue), dashed: true },
+            { label: comparisonSeriesLabel, color: "#d29922", values: previous.daily.map((day) => day.solarValue), dashed: true },
           ],
           labels: dayIndexLabels,
           valueFormatter: (value) => formatCurrency(value, config.currency || "EUR"),
@@ -1132,11 +1690,23 @@ function renderCostCard(analytics: AnalyticsBundle, currency: string): string {
         labels: analytics.daily.map((day) => day.label),
         valueFormatter: (value) => formatCurrency(value, currency),
       })}
+      <div class="analysis-subchart">
+        <h4 class="analysis-subtitle">Daily net energy value</h4>
+        ${renderLineChart({
+          title: "Daily net energy value",
+          series: [{ label: "Net value", color: "#39c5cf", values: analytics.daily.map((day) => day.netValue) }],
+          labels: analytics.daily.map((day) => day.label),
+          referenceValue: 0,
+          referenceLabel: "Break-even",
+          valueFormatter: (value) => formatSignedCurrency(value, currency),
+        })}
+      </div>
       <div class="analysis-cost-totals">
         <span>Import cost: <strong>${formatCurrency(analytics.totals.importCost, currency)}</strong></span>
         <span>Solar savings: <strong>${formatCurrency(analytics.totals.solarSavings, currency)}</strong></span>
         <span>Export earnings: <strong>${formatCurrency(analytics.totals.exportRevenue, currency)}</strong></span>
         <span>Exceedance cost: <strong>${formatCurrency(analytics.totals.exceedanceCost, currency)}</strong></span>
+        <span>Net value: <strong>${formatSignedCurrency(analytics.totals.netValue, currency)}</strong></span>
       </div>
     </div>
   `;
@@ -1210,8 +1780,13 @@ export function renderAnalysis(state: AppState): string {
       ${renderDailyBreakdownCard(analytics)}
 
       <div class="analysis-grid">
+        ${renderIntradayProfileCard(state, analytics)}
         ${renderHeatmapCard(state, analytics)}
+      </div>
+
+      <div class="analysis-grid">
         ${renderSolarCoverageCard(analytics, currency)}
+        ${renderTariffOpportunityCard(analytics, currency)}
       </div>
 
       <div class="analysis-grid">
@@ -1223,6 +1798,8 @@ export function renderAnalysis(state: AppState): string {
         ${renderCostCard(analytics, currency)}
         ${renderLoadDurationCard(analytics, config.reference_power_kw ?? 0)}
       </div>
+
+      ${renderPeakAnatomyCard(analytics)}
     </section>
   `;
 }

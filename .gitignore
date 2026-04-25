@@ -66,6 +66,7 @@ frontend-src/testem.log
 frontend-src/dist/
 frontend-src/.cache/
 frontend-src/dev/dev-config.json
+standalone/*.log
 
 # OS
 .DS_Store

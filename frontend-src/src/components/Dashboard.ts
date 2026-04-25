@@ -9,6 +9,14 @@
  */
 import type { AppState } from "./App";
 import { fmtNum, fmtDate } from "../utils/format";
+import {
+  CHART_TIME_BUCKETS,
+  formatChartPeriodLabel,
+  getChartSpanMs,
+  getShiftedChartRange,
+  getChartTimeBucketOption,
+  isChartTimeBucketEnabled,
+} from "../utils/chartTime";
 
 export const RANGES: { id: string; label: string }[] = [
   { id: "yesterday", label: "Yesterday" },
@@ -20,6 +28,93 @@ export const RANGES: { id: string; label: string }[] = [
   { id: "last_year", label: "Last Year" },
   { id: "custom", label: "Custom" },
 ];
+
+type DashboardUiIcon =
+  | "consumption"
+  | "production"
+  | "export"
+  | "self_consumed"
+  | "flow"
+  | "metrics"
+  | "profile"
+  | "warning"
+  | "ok";
+
+function dashboardUiIcon(icon: DashboardUiIcon): string {
+  const svg = (body: string) => `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      ${body}
+    </svg>
+  `;
+
+  switch (icon) {
+    case "consumption":
+      return svg(`
+        <path d="M13 2L6 13H11L10 22L18 10H13Z" />
+      `);
+    case "production":
+      return svg(`
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2V4.5" />
+        <path d="M12 19.5V22" />
+        <path d="M2 12H4.5" />
+        <path d="M19.5 12H22" />
+        <path d="M4.93 4.93L6.7 6.7" />
+        <path d="M17.3 17.3L19.07 19.07" />
+        <path d="M17.3 6.7L19.07 4.93" />
+        <path d="M4.93 19.07L6.7 17.3" />
+      `);
+    case "export":
+      return svg(`
+        <path d="M6 18H18" />
+        <path d="M12 6V16" />
+        <path d="M8 10L12 6L16 10" />
+      `);
+    case "self_consumed":
+      return svg(`
+        <path d="M4 11.5L12 5L20 11.5" />
+        <path d="M6.5 10.5V19H17.5V10.5" />
+        <path d="M10.5 19V14H13.5V19" />
+      `);
+    case "flow":
+      return svg(`
+        <path d="M8 7H17L14.5 4.5" />
+        <path d="M17 7L14.5 9.5" />
+        <path d="M16 17H7L9.5 19.5" />
+        <path d="M7 17L9.5 14.5" />
+        <path d="M7 17C5.5 15.8 4.5 14 4.5 12C4.5 10.7 4.9 9.5 5.6 8.5" />
+        <path d="M17 7C18.5 8.2 19.5 10 19.5 12C19.5 13.3 19.1 14.5 18.4 15.5" />
+      `);
+    case "metrics":
+      return svg(`
+        <path d="M5 19V11" />
+        <path d="M12 19V7" />
+        <path d="M19 19V4" />
+        <path d="M3 19H21" />
+      `);
+    case "profile":
+      return svg(`
+        <path d="M4 19V5" />
+        <path d="M4 19H20" />
+        <path d="M7 15L11 11L14 13L19 8" />
+        <circle cx="7" cy="15" r="1.25" fill="currentColor" stroke="none" />
+        <circle cx="11" cy="11" r="1.25" fill="currentColor" stroke="none" />
+        <circle cx="14" cy="13" r="1.25" fill="currentColor" stroke="none" />
+        <circle cx="19" cy="8" r="1.25" fill="currentColor" stroke="none" />
+      `);
+    case "warning":
+      return svg(`
+        <path d="M12 4L20 19H4L12 4Z" />
+        <path d="M12 9V13" />
+        <path d="M12 16H12.01" />
+      `);
+    case "ok":
+      return svg(`
+        <circle cx="12" cy="12" r="8" />
+        <path d="M8.5 12.5L11 15L15.5 9.5" />
+      `);
+  }
+}
 
 export function renderDashboard(state: AppState): string {
   const d = state.rangeData;
@@ -580,13 +675,57 @@ export function renderDashboard(state: AppState): string {
       : state.range === "custom" && state.customStart && state.customEnd
       ? `${fmtDate(state.customStart + "T00:00:00")} — ${fmtDate(state.customEnd + "T00:00:00")}`
       : RANGES.find((r) => r.id === state.range)?.label ?? "Yesterday";
+  const chartItems = state.consumptionTimeseries?.items?.length
+    ? state.consumptionTimeseries.items
+    : state.productionTimeseries?.items ?? [];
+  const chartPeriodStart = state.chartViewportStart ?? chartItems[0]?.startedAt ?? d?.start;
+  const chartPeriodEnd =
+    state.chartViewportEnd ?? chartItems[chartItems.length - 1]?.startedAt ?? d?.end;
+  const chartSpanMs = getChartSpanMs(chartPeriodStart, chartPeriodEnd);
+  const activeBucket = getChartTimeBucketOption(state.chartTimeBucket);
+  const chartPeriodLabel = formatChartPeriodLabel(chartPeriodStart, chartPeriodEnd);
+  const nextChartRange = getShiftedChartRange(
+    chartPeriodStart,
+    chartPeriodEnd,
+    state.chartTimeBucket,
+    1,
+  );
+  const now = new Date();
+  const disableNextPeriod =
+    !nextChartRange ||
+    nextChartRange.start.getTime() > now.getTime();
+  const chartBucketControls = CHART_TIME_BUCKETS.map((bucket) => {
+    const enabled = isChartTimeBucketEnabled(bucket.id, chartSpanMs);
+    const isActive = bucket.id === state.chartTimeBucket;
+    const disabledReason = bucket.id === "quarter_hour"
+      ? "15-minute detail would be too dense for this selected period"
+      : `${bucket.label} detail does not add useful resolution for this selected period`;
+
+    return `
+            <button
+              class="unit-btn chart-bucket-btn ${isActive ? "active" : ""}"
+              data-chart-bucket="${bucket.id}"
+              title="${enabled ? `Show ${bucket.label.toLowerCase()} detail` : disabledReason}"
+              ${enabled ? "" : "disabled aria-disabled=\"true\""}
+            >${bucket.label}</button>
+          `;
+  }).join("");
+  const chartUnitHint = state.chartUnit === "kw"
+    ? "kW uses the same detail presets as kWh, but keeps power values in interval bars so short spikes and dips stay visible."
+    : "kWh keeps the aggregated period bars for totals.";
   const chartHint = state.chartConsumptionView === "house"
-    ? "Total Usage shows the full house load, with the solar-covered share highlighted in green and exports below zero · Scroll to zoom · Drag to pan"
-    : "Net Grid focuses on what still came from the grid after solar, with exports shown below zero · The reference limit in kW mode applies here · Scroll to zoom · Drag to pan";
+    ? "Total Usage shows the full house load, with the solar-covered share highlighted in green and exports below zero. Use the detail presets and arrows above the graph to move through time."
+    : state.chartConsumptionView === "solar_systems"
+      ? "PV Systems stacks each configured solar production meter so you can compare panel-system output like the Home Assistant Energy dashboard."
+      : "Net Grid focuses on what still came from the grid after solar, with exports shown below zero. The reference limit in kW mode applies here.";
+  const chartHintCopy = `${chartHint} ${chartUnitHint}`;
+  const exceedanceIcon = (d?.exceedance_kwh ?? 0) > 0
+    ? dashboardUiIcon("warning")
+    : dashboardUiIcon("ok");
 
   return `
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.8.0</div>
+      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.9.0</div>
 
       <!-- Range Selector -->
       <div class="range-selector">
@@ -648,7 +787,7 @@ export function renderDashboard(state: AppState): string {
       <!-- Stat Cards -->
       <div class="stats-grid">
         <div class="stat-card consumption">
-          <div class="stat-icon">⚡</div>
+          <div class="stat-icon">${dashboardUiIcon("consumption")}</div>
           <div class="stat-body">
             <div class="stat-label">Consumption</div>
             <div class="stat-value">${fmtNum(consumption)} <span class="stat-unit">kWh</span></div>
@@ -656,7 +795,7 @@ export function renderDashboard(state: AppState): string {
         </div>
 
         <div class="stat-card production">
-          <div class="stat-icon">☀️</div>
+          <div class="stat-icon">${dashboardUiIcon("production")}</div>
           <div class="stat-body">
             <div class="stat-label">Production</div>
             <div class="stat-value">${fmtNum(production)} <span class="stat-unit">kWh</span></div>
@@ -664,7 +803,7 @@ export function renderDashboard(state: AppState): string {
         </div>
 
         <div class="stat-card.export">
-          <div class="stat-icon">📤</div>
+          <div class="stat-icon">${dashboardUiIcon("export")}</div>
           <div class="stat-body">
             <div class="stat-label">Exported</div>
             <div class="stat-value">${fmtNum(exported)} <span class="stat-unit">kWh</span></div>
@@ -672,7 +811,7 @@ export function renderDashboard(state: AppState): string {
         </div>
 
         <div class="stat-card.self-consumed">
-          <div class="stat-icon">🏠</div>
+          <div class="stat-icon">${dashboardUiIcon("self_consumed")}</div>
           <div class="stat-body">
             <div class="stat-label">Self-Consumed</div>
             <div class="stat-value">${fmtNum(selfConsumed)} <span class="stat-unit">kWh</span></div>
@@ -683,7 +822,7 @@ export function renderDashboard(state: AppState): string {
       <!-- Energy Flow + Key Metrics side by side -->
       <div class="flow-metrics-row">
         <div class="card flow-card">
-          <h3 class="card-title"><span class="title-icon">🔄</span> Energy Flow</h3>
+          <h3 class="card-title"><span class="title-icon">${dashboardUiIcon("flow")}</span> Energy Flow</h3>
 
           <div class="leneda-elite-flow">
             <div class="elite-header">
@@ -709,6 +848,18 @@ export function renderDashboard(state: AppState): string {
                 <div class="module-visual"><div class="wave-bg green"></div></div>
               </div>
             </div>
+
+            <div class="flow-scene-summary">
+              <span class="flow-scene-chip solar">Self-sufficient ${fmtNum(selfSufficiency, 0)}%</span>
+              <span class="flow-scene-chip import">Grid import ${fmtNum(boughtFromGrid)} kWh</span>
+              <span class="flow-scene-chip export">Export ${fmtNum(soldToMarket)} kWh</span>
+              <span class="flow-scene-chip community">Community ${fmtNum(communityExchange)} kWh</span>
+              ${peakPower > 0 ? `<span class="flow-scene-chip neutral">Peak ${fmtNum(peakPower, 2)} kW</span>` : ""}
+            </div>
+
+            <p class="flow-scene-caption">
+              Thicker paths show larger energy volumes for the selected period. Green flows stay in the home, red flows come from the grid, blue flows leave the home or community, and amber shows gas.
+            </p>
 
             ${renderDesktopScene()}
             ${renderMobileScene()}
@@ -776,21 +927,21 @@ export function renderDashboard(state: AppState): string {
                 <span class="flow-legend-dot"></span>
                 <span class="flow-legend-copy">
                   <strong>Solar to home</strong>
-                  <span>${fmtNum(solarToHome)} kWh used in the house</span>
+                  <span>${fmtNum(solarToHome)} kWh directly supplied inside the house</span>
                 </span>
               </div>
               <div class="flow-legend-item import">
                 <span class="flow-legend-dot"></span>
                 <span class="flow-legend-copy">
                   <strong>Bought from grid</strong>
-                  <span>${fmtNum(boughtFromGrid)} kWh bought from the grid</span>
+                  <span>${fmtNum(boughtFromGrid)} kWh still needed from the grid</span>
                 </span>
               </div>
               <div class="flow-legend-item export">
                 <span class="flow-legend-dot"></span>
                 <span class="flow-legend-copy">
                   <strong>Grid export</strong>
-                  <span>${fmtNum(soldToMarket)} kWh sent back to the market</span>
+                  <span>${fmtNum(soldToMarket)} kWh sent back to the market or grid</span>
                 </span>
               </div>
               <div class="flow-legend-item community">
@@ -815,7 +966,7 @@ export function renderDashboard(state: AppState): string {
 
       <!-- Key Metrics (right of flow) -->
       <div class="card metrics-card">
-        <h3 class="card-title"><span class="title-icon">📈</span> Key Metrics</h3>
+        <h3 class="card-title"><span class="title-icon">${dashboardUiIcon("metrics")}</span> Key Metrics</h3>
         <div class="metrics-list">
           <div class="metric">
             <div class="metric-header">
@@ -842,7 +993,7 @@ export function renderDashboard(state: AppState): string {
           ` : ""}
           <div class="metric ${(d?.exceedance_kwh ?? 0) > 0 ? "metric-warning" : "metric-ok"}">
             <div class="metric-header">
-              <span class="metric-label">${(d?.exceedance_kwh ?? 0) > 0 ? "⚠️" : "✅"} Exceedance</span>
+              <span class="metric-label"><span class="metric-status-icon">${exceedanceIcon}</span> Exceedance</span>
               <span class="metric-value">${fmtNum(d?.exceedance_kwh ?? 0, 2)} kWh</span>
             </div>
           </div>
@@ -867,8 +1018,36 @@ export function renderDashboard(state: AppState): string {
       <!-- Chart -->
       <div class="card chart-card">
         <div class="chart-header">
-          <h3 class="card-title"><span class="title-icon">📉</span> Energy Profile — ${rangeLabel}</h3>
-          <div class="chart-unit-toggle">
+          <h3 class="card-title"><span class="title-icon">${dashboardUiIcon("profile")}</span> Energy Profile — ${rangeLabel}</h3>
+          <div class="chart-period-status">
+            <span class="chart-period-kicker">Showing</span>
+            <strong>${chartPeriodLabel}</strong>
+            <span>${activeBucket.label} detail</span>
+          </div>
+
+          <div class="chart-control-stack">
+            <div class="chart-period-controls" aria-label="Move chart period">
+              <button
+                class="chart-nav-btn"
+                data-chart-period-nav="prev"
+                title="Previous ${activeBucket.stepLabel}"
+                aria-label="Previous ${activeBucket.stepLabel}"
+              >&larr;</button>
+              <span class="chart-period-pill">${chartPeriodLabel}</span>
+              <button
+                class="chart-nav-btn"
+                data-chart-period-nav="next"
+                title="Next ${activeBucket.stepLabel}"
+                aria-label="Next ${activeBucket.stepLabel}"
+                ${disableNextPeriod ? "disabled aria-disabled=\"true\"" : ""}
+              >&rarr;</button>
+            </div>
+
+            <div class="chart-bucket-toggle" aria-label="Chart detail presets">
+              ${chartBucketControls}
+            </div>
+
+            <div class="chart-unit-toggle">
             <button
               class="unit-btn ${state.chartUnit === "kw" ? "active" : ""}"
               data-chart-unit="kw"
@@ -890,17 +1069,18 @@ export function renderDashboard(state: AppState): string {
               title="Show the net draw from the grid after solar"
             >Net Grid</button>
             <button
-              class="reset-zoom-btn"
-              style="display: none;"
-              title="Reset zoom to full period"
-            >↩ Reset Zoom</button>
+              class="unit-btn ${state.chartConsumptionView === "solar_systems" ? "active" : ""}"
+              data-chart-view="solar_systems"
+              title="Show each configured solar production meter as a stacked PV performance chart"
+            >PV Systems</button>
+            </div>
           </div>
         </div>
         <div class="chart-container">
           <canvas id="energy-chart"></canvas>
         </div>
         <p class="muted chart-hint" style="text-align:center; margin-top: var(--sp-2); font-size: var(--text-xs);">
-          ${chartHint}
+          ${chartHintCopy}
         </p>
       </div>
 

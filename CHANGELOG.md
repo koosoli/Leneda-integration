@@ -3,6 +3,24 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.9.0] - 2026-04-25
+
+### New Features
+- **Per-System Solar Financial Breakdown:** Added a per-PV-system self-use vs export table in the invoice so each solar system shows produced, self-consumed, exported, tariff, export revenue, and self-use financial advantage.
+- **Dashboard PV Systems Graph:** Added a `PV Systems` dashboard graph mode that stacks each configured solar production meter, making multi-system production performance easier to compare visually.
+- **Dashboard Time Detail Controls:** Added explicit `Year`, `Month`, `Week`, `Day`, `Hour`, and `15 min` graph presets with unavailable resolutions disabled automatically, plus previous/next period arrows and a clear current-period label above the dashboard chart.
+- **Expanded Charts Analysis Workspace:** Added an intraday weekday-versus-weekend profile, hourly tariff-opportunity analysis, peak-interval anatomy, daily net energy value tracking, extra exceedance heatmap modes, and switchable `Previous Period` / `Last Year` comparison views on the Charts page.
+
+### Improvements
+- **Invoice Wording Clarity:** Split supplier bill estimate, feed-in revenue, total solar value, and net electricity position labels so solar savings are easier to interpret and not mistaken for supplier bill line items.
+- **Preset Per-Meter Refresh:** Preset range changes now refresh per-meter PV production data too, keeping the dashboard graph and invoice allocation aligned with custom ranges.
+- **Billing Meter Precision:** Kept invoice energy quantities at three decimal places and aligned standalone grid-import calculations with the primary billing consumption meter.
+- **Dashboard kW/kWh Consistency:** Kept `kW` on interval bars, restored the full 15-minute detail view for short periods, and aligned `kW` and `kWh` around the same time-detail controls instead of separate interaction patterns.
+- **Chart Interaction Cleanup:** Removed mouse-wheel and pinch zoom from the dashboard graph so page scrolling is no longer trapped, and moved time navigation to the new explicit chart controls.
+- **Flow and Chart Readability:** Added clearer dashboard chart hints, period status, and infographic summary copy so the active view, flow meaning, and energy direction are easier to understand at a glance.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.9.0`.
+
+
 ## [v2.8.0] - 2026-04-24
 
 ### New Features

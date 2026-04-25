@@ -229,7 +229,7 @@ a:hover {
 /* ── Chart header with unit toggle ─────────────────────────────── */
 .chart-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-3);
   flex-wrap: wrap;
@@ -238,10 +238,103 @@ a:hover {
 
 .chart-header .card-title {
   margin-bottom: 0;
+  flex: 0 1 auto;
 }
 
+.chart-period-status {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  flex: 1 1 260px;
+  color: var(--clr-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.chart-period-status strong {
+  color: var(--clr-text);
+  font-weight: 700;
+}
+
+.chart-period-kicker {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--clr-primary-muted);
+  color: var(--clr-primary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chart-control-stack {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: end;
+  min-width: min(100%, 760px);
+  flex: 1 1 560px;
+}
+
+.chart-period-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.chart-period-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--clr-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+  color: var(--clr-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: center;
+}
+
+.chart-nav-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--clr-border);
+  background: var(--clr-surface-alt);
+  color: var(--clr-text);
+  cursor: pointer;
+  transition: transform var(--duration-md) var(--ease),
+    border-color var(--duration-md) var(--ease),
+    background var(--duration-md) var(--ease),
+    color var(--duration-md) var(--ease);
+}
+
+.chart-nav-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--clr-primary);
+  background: var(--clr-primary-muted);
+  color: var(--clr-primary);
+}
+
+.chart-nav-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.chart-bucket-toggle,
 .chart-unit-toggle {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 2px;
   background: var(--clr-bg);
   padding: 2px;
@@ -272,22 +365,19 @@ a:hover {
   box-shadow: var(--shadow-sm);
 }
 
-.reset-zoom-btn {
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: #d29922;
-  background: rgba(210, 153, 34, 0.12);
-  border: 1px solid rgba(210, 153, 34, 0.3);
-  border-radius: calc(var(--radius-sm) - 2px);
-  cursor: pointer;
-  transition: all var(--duration-md) var(--ease);
-  margin-left: var(--sp-2);
+.chart-bucket-btn {
+  min-width: 68px;
 }
 
-.reset-zoom-btn:hover {
-  background: rgba(210, 153, 34, 0.25);
-  color: #e6a700;
+.unit-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  color: var(--clr-muted);
+}
+
+.unit-btn:disabled:hover {
+  color: var(--clr-muted);
+  background: transparent;
 }
 
 .chart-hint {
@@ -349,6 +439,56 @@ a:hover {
   margin-bottom: var(--sp-10);
   position: relative;
   z-index: 1;
+}
+
+.flow-scene-summary {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.flow-scene-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--clr-overlay-border);
+  background: var(--clr-overlay);
+  color: var(--clr-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.flow-scene-chip.solar {
+  color: var(--clr-production);
+}
+
+.flow-scene-chip.import {
+  color: var(--clr-consumption);
+}
+
+.flow-scene-chip.export,
+.flow-scene-chip.community {
+  color: var(--clr-primary);
+}
+
+.flow-scene-chip.neutral {
+  color: var(--clr-text);
+}
+
+.flow-scene-caption {
+  position: relative;
+  z-index: 1;
+  margin-bottom: var(--sp-4);
+  max-width: 72ch;
+  color: var(--clr-muted);
+  font-size: var(--text-sm);
+  line-height: 1.55;
 }
 
 /* Glass Floating Modules */
@@ -1203,6 +1343,21 @@ a:hover {
     overflow: hidden;
   }
 
+  .chart-control-stack {
+    min-width: 100%;
+    justify-items: stretch;
+  }
+
+  .chart-period-controls,
+  .chart-bucket-toggle,
+  .chart-unit-toggle {
+    justify-content: flex-start;
+  }
+
+  .chart-period-pill {
+    flex: 1 1 220px;
+  }
+
   .form-row {
     flex-direction: column;
     align-items: stretch;
@@ -1226,6 +1381,14 @@ a:hover {
     grid-template-columns: 1fr;
     gap: var(--sp-3);
     margin-bottom: var(--sp-6);
+  }
+
+  .flow-scene-summary {
+    gap: var(--sp-2);
+  }
+
+  .flow-scene-chip {
+    white-space: normal;
   }
 
   .elite-scene-desktop {
@@ -1323,6 +1486,22 @@ a:hover {
     flex-direction: column;
     align-items: stretch;
     gap: var(--sp-1);
+  }
+
+  .chart-period-status {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .chart-period-controls {
+    width: 100%;
+  }
+
+  .chart-period-pill {
+    min-width: 0;
+    flex: 1 1 auto;
+    font-size: var(--text-xs);
+    padding: 0 var(--sp-3);
   }
 
   .leneda-elite-flow {

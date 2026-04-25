@@ -27,6 +27,13 @@ import { renderSensors } from "./Sensors";
 import { renderInvoice } from "./Invoice";
 import { renderSettings } from "./Settings";
 import { renderNavBar } from "./NavBar";
+import {
+  getChartSpanMs,
+  getShiftedChartRange,
+  getRecommendedChartTimeBucket,
+  isChartTimeBucketEnabled,
+  type ChartTimeBucket,
+} from "../utils/chartTime";
 
 // ── localStorage credential helpers (persist across reloads, never in git) ──
 
@@ -65,9 +72,18 @@ function saveTheme(theme: ThemeMode): void {
 }
 
 export type Tab = "dashboard" | "charts" | "sensors" | "invoice" | "settings";
+export type AnalysisComparisonMode = "previous" | "last_year";
+export type AnalysisHeatmapMetric =
+  | "house"
+  | "grid"
+  | "solar"
+  | "exceedance_kwh"
+  | "exceedance_frequency";
+export type AnalysisProfileMetric = "house" | "grid" | "solar";
 
 export interface AnalysisComparisonData {
   key: string;
+  mode: AnalysisComparisonMode;
   start: string;
   end: string;
   consumptionTimeseries: TimeseriesResponse | null;
@@ -82,8 +98,11 @@ export interface AppState {
   chartViewportStart: string | null;
   chartViewportEnd: string | null;
   chartUnit: "kw" | "kwh";
-  chartConsumptionView: "house" | "grid";
-  analysisHeatmapMetric: "house" | "grid" | "solar";
+  chartTimeBucket: ChartTimeBucket;
+  chartConsumptionView: "house" | "grid" | "solar_systems";
+  analysisHeatmapMetric: AnalysisHeatmapMetric;
+  analysisProfileMetric: AnalysisProfileMetric;
+  analysisComparisonMode: AnalysisComparisonMode;
   analysisComparison: AnalysisComparisonData | null;
   analysisComparisonLoading: boolean;
   rangeData: RangeData | null;
@@ -221,8 +240,11 @@ export class LenedaApp {
     chartViewportStart: null,
     chartViewportEnd: null,
     chartUnit: "kwh",
+    chartTimeBucket: "quarter_hour",
     chartConsumptionView: "grid",
     analysisHeatmapMetric: "grid",
+    analysisProfileMetric: "house",
+    analysisComparisonMode: "previous",
     analysisComparison: null,
     analysisComparisonLoading: false,
     rangeData: null,
@@ -349,15 +371,42 @@ export class LenedaApp {
     this.state.chartViewportEnd = null;
   }
 
+  private normalizeChartTimeBucket(): void {
+    const { start, end } = this.getDateRangeISO();
+    const nextBucket = getRecommendedChartTimeBucket(
+      getChartSpanMs(start, end),
+      this.state.chartTimeBucket,
+    );
+    if (nextBucket !== this.state.chartTimeBucket) {
+      this.state.chartTimeBucket = nextBucket;
+    }
+  }
+
   private getCurrentRangeKey(): string {
     const { start, end } = this.getDateRangeISO();
     return `${start}|${end}`;
   }
 
+  private shiftIsoByYears(value: string, yearDelta: number): string {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return value;
+    const shifted = new Date(date);
+    shifted.setUTCFullYear(shifted.getUTCFullYear() + yearDelta);
+    return shifted.toISOString();
+  }
+
   private getComparisonRangeISO(
     currentStartIso: string,
     currentEndIso: string,
+    mode: AnalysisComparisonMode,
   ): { start: string; end: string } {
+    if (mode === "last_year") {
+      return {
+        start: this.shiftIsoByYears(currentStartIso, -1),
+        end: this.shiftIsoByYears(currentEndIso, -1),
+      };
+    }
+
     const currentStartMs = new Date(currentStartIso).getTime();
     const currentEndMs = new Date(currentEndIso).getTime();
     const durationMs = Math.max(0, currentEndMs - currentStartMs);
@@ -374,13 +423,14 @@ export class LenedaApp {
     if (!this.state.consumptionTimeseries || !this.state.productionTimeseries) return;
 
     const { start, end } = this.getDateRangeISO();
-    const key = `${start}|${end}`;
+    const mode = this.state.analysisComparisonMode;
+    const key = `${start}|${end}|${mode}`;
     if (!force) {
       if (this.state.analysisComparisonLoading) return;
       if (this.state.analysisComparison?.key === key) return;
     }
 
-    const comparisonRange = this.getComparisonRangeISO(start, end);
+    const comparisonRange = this.getComparisonRangeISO(start, end, mode);
     this.state.analysisComparisonLoading = true;
     if (this.state.tab === "charts") {
       this.renderPreserveMainScroll();
@@ -396,6 +446,7 @@ export class LenedaApp {
 
       this.state.analysisComparison = {
         key,
+        mode,
         start: comparisonRange.start,
         end: comparisonRange.end,
         consumptionTimeseries: comparisonConsumption,
@@ -479,14 +530,16 @@ export class LenedaApp {
     this.render();
     try {
       const { start, end } = this.getDateRangeISO();
-      const [rangeData, consumptionTimeseries, productionTimeseries] = await Promise.all([
+      const [rangeData, consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
         fetchRangeData(range),
         fetchTimeseries("1-1:1.29.0", start, end),
         fetchTimeseries("1-1:2.29.0", start, end),
+        this.fetchPerMeterProductionForRange(this.state.config, start, end),
       ]);
       this.state.rangeData = rangeData;
       this.state.consumptionTimeseries = consumptionTimeseries;
       this.state.productionTimeseries = productionTimeseries;
+      this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
     } catch (e) {
       this.clearRangeStateWithError(e, "Missing data");
     } finally {
@@ -556,6 +609,16 @@ export class LenedaApp {
     }
   }
 
+  private async shiftChartPeriod(direction: -1 | 1): Promise<void> {
+    const { start, end } = this.getDateRangeISO();
+    const nextRange = getShiftedChartRange(start, end, this.state.chartTimeBucket, direction);
+    if (!nextRange) return;
+    await this.handleChartZoomChange(
+      toLocalOffsetIso(nextRange.start),
+      toLocalOffsetIso(nextRange.end),
+    );
+  }
+
   private changeTab(tab: Tab): void {
     this.state.tab = tab;
     this.render();
@@ -564,8 +627,8 @@ export class LenedaApp {
     if ((tab === "dashboard" || tab === "charts") && !this.state.rangeData && !this.state.loading) {
       this.loadData();
     }
-    if (tab === "charts" && this.state.rangeData && !this.state.analysisComparison && !this.state.analysisComparisonLoading) {
-      this.loadAnalysisComparison();
+    if (tab === "charts" && this.state.rangeData) {
+      void this.loadAnalysisComparison();
     }
     if (tab === "sensors" && !this.state.sensors) {
       fetchSensors().then((s) => {
@@ -715,6 +778,10 @@ export class LenedaApp {
     }
 
     // ── Normal render ──
+    if (this.state.rangeData) {
+      this.normalizeChartTimeBucket();
+    }
+
     let tabContent = "";
     switch (tab) {
       case "dashboard":
@@ -800,9 +867,28 @@ export class LenedaApp {
       });
     });
 
+    this.root.querySelectorAll("[data-chart-bucket]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const bucket = (btn as HTMLElement).dataset.chartBucket as ChartTimeBucket;
+        const { start, end } = this.getDateRangeISO();
+        if (!isChartTimeBucketEnabled(bucket, getChartSpanMs(start, end))) return;
+        if (bucket !== this.state.chartTimeBucket) {
+          this.state.chartTimeBucket = bucket;
+          this.renderPreserveMainScroll();
+        }
+      });
+    });
+
+    this.root.querySelectorAll("[data-chart-period-nav]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const direction = (btn as HTMLElement).dataset.chartPeriodNav === "next" ? 1 : -1;
+        void this.shiftChartPeriod(direction);
+      });
+    });
+
     this.root.querySelectorAll("[data-chart-view]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const view = (btn as HTMLElement).dataset.chartView as "house" | "grid";
+        const view = (btn as HTMLElement).dataset.chartView as "house" | "grid" | "solar_systems";
         if (view !== this.state.chartConsumptionView) {
           this.state.chartConsumptionView = view;
           this.renderPreserveMainScroll();
@@ -849,10 +935,31 @@ export class LenedaApp {
   private attachAnalysisListeners(): void {
     this.root.querySelectorAll("[data-analysis-heatmap]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const metric = (btn as HTMLElement).dataset.analysisHeatmap as "house" | "grid" | "solar";
+        const metric = (btn as HTMLElement).dataset.analysisHeatmap as AnalysisHeatmapMetric;
         if (metric !== this.state.analysisHeatmapMetric) {
           this.state.analysisHeatmapMetric = metric;
           this.renderPreserveMainScroll();
+        }
+      });
+    });
+
+    this.root.querySelectorAll("[data-analysis-profile]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const metric = (btn as HTMLElement).dataset.analysisProfile as AnalysisProfileMetric;
+        if (metric !== this.state.analysisProfileMetric) {
+          this.state.analysisProfileMetric = metric;
+          this.renderPreserveMainScroll();
+        }
+      });
+    });
+
+    this.root.querySelectorAll("[data-analysis-comparison-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = (btn as HTMLElement).dataset.analysisComparisonMode as AnalysisComparisonMode;
+        if (mode !== this.state.analysisComparisonMode) {
+          this.state.analysisComparisonMode = mode;
+          this.state.analysisComparison = null;
+          void this.loadAnalysisComparison(true);
         }
       });
     });
@@ -1288,6 +1395,7 @@ export class LenedaApp {
         perMeterProduction,
         viewportStartMs,
         viewportEndMs,
+        timeBucket: this.state.chartTimeBucket,
         onZoomChange: (zoomStart: string, zoomEnd: string) => {
           this.handleChartZoomChange(zoomStart, zoomEnd);
         },
@@ -1311,6 +1419,10 @@ export class LenedaApp {
         this.preZoomCustomStart = this.state.customStart;
         this.preZoomCustomEnd = this.state.customEnd;
       }
+
+      this.state.error = null;
+      this.state.loading = true;
+      this.renderPreserveMainScroll();
 
       const { fetchCustomData } = await import("../api/leneda");
       const startDate = start.slice(0, 10);
@@ -1351,11 +1463,13 @@ export class LenedaApp {
       this.state.consumptionTimeseries = consumptionTimeseries;
       this.state.productionTimeseries = productionTimeseries;
       this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
+      this.state.loading = false;
 
       // Full re-render so the chart can rebuild with a finer aggregation for the zoomed period.
       this.renderPreserveMainScroll();
     } catch (e) {
       console.error("Zoom data fetch failed:", e);
+      this.state.loading = false;
       this.clearRangeStateWithError(e, "Missing data");
       this.render();
     }
