@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.9.1] - 2026-04-25
+
+### Bug Fixes
+- **Chart/Invoice Solar Alignment:** Corrected the solar-flow breakdown so the dashboard chart, Charts analysis workspace, and invoice page now use the same Leneda grid-import, export, direct self-use, and shared-energy split instead of mixing authoritative billing data with fallback reconstruction.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.9.1`.
+
+
 ## [v2.9.0] - 2026-04-25
 
 ### New Features

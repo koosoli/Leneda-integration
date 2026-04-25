@@ -14,6 +14,7 @@ import type {
   TimeseriesResponse,
 } from "../api/leneda";
 import { fmtDate, fmtDateLong, fmtDateTime, fmtNum } from "../utils/format";
+import { buildEnergyFlowPoints } from "../utils/energyFlow";
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HEATMAP_LABELS = {
@@ -269,43 +270,27 @@ function resolveAverageFeedInRate(config: BillingConfig): number {
 function buildIntervalPoints(
   consumption: TimeseriesResponse,
   production: TimeseriesResponse,
+  gridImport: TimeseriesResponse | null | undefined,
+  marketExport: TimeseriesResponse | null | undefined,
   config: BillingConfig,
 ): IntervalPoint[] {
-  const pointMap = new Map<number, { houseKw: number; solarKw: number; iso: string }>();
-
-  for (const item of consumption.items) {
-    const timestamp = new Date(item.startedAt).getTime();
-    if (!Number.isFinite(timestamp)) continue;
-    const existing = pointMap.get(timestamp) ?? { houseKw: 0, solarKw: 0, iso: item.startedAt };
-    existing.houseKw += Math.max(0, Number(item.value) || 0);
-    existing.iso = item.startedAt;
-    pointMap.set(timestamp, existing);
-  }
-
-  for (const item of production.items) {
-    const timestamp = new Date(item.startedAt).getTime();
-    if (!Number.isFinite(timestamp)) continue;
-    const existing = pointMap.get(timestamp) ?? { houseKw: 0, solarKw: 0, iso: item.startedAt };
-    existing.solarKw += Math.max(0, Number(item.value) || 0);
-    existing.iso = existing.iso || item.startedAt;
-    pointMap.set(timestamp, existing);
-  }
-
   const rateWindows = config.consumption_rate_windows ?? [];
   const referenceWindows = config.reference_power_windows ?? [];
   const defaultReferenceKw = config.reference_power_kw ?? 0;
   const avgFeedInRate = resolveAverageFeedInRate(config);
   const exceedanceRateWithVat = (config.exceedance_rate ?? 0) * (1 + (config.vat_rate ?? 0));
 
-  return [...pointMap.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([timestamp, point]) => {
+  return buildEnergyFlowPoints(consumption, production, {
+    gridImport,
+    marketExport,
+  }).map((point) => {
+      const timestamp = point.timestamp;
       const date = new Date(timestamp);
-      const houseKw = Math.max(0, point.houseKw);
-      const solarKw = Math.max(0, point.solarKw);
-      const solarToHomeKw = Math.max(0, Math.min(houseKw, solarKw));
-      const gridKw = Math.max(0, houseKw - solarToHomeKw);
-      const exportKw = Math.max(0, solarKw - solarToHomeKw);
+      const houseKw = point.consumptionKw;
+      const solarKw = point.productionKw;
+      const solarToHomeKw = point.solarToHomeKw;
+      const gridKw = point.gridImportKw;
+      const exportKw = point.solarExportKw;
       const referenceKw = findReferenceWindow(date, referenceWindows)?.reference_power_kw ?? defaultReferenceKw;
       const grossOverKw = Math.max(0, houseKw - referenceKw);
       const overKw = Math.max(0, gridKw - referenceKw);
@@ -341,9 +326,11 @@ function buildIntervalPoints(
 function buildAnalytics(
   consumption: TimeseriesResponse,
   production: TimeseriesResponse,
+  gridImport: TimeseriesResponse | null | undefined,
+  marketExport: TimeseriesResponse | null | undefined,
   config: BillingConfig,
 ): AnalyticsBundle {
-  const points = buildIntervalPoints(consumption, production, config);
+  const points = buildIntervalPoints(consumption, production, gridImport, marketExport, config);
   const dailyMap = new Map<string, DailyBucket>();
   const hourlyExceedanceKwh = Array.from({ length: 24 }, () => 0);
   const hourlyOpportunity: HourOpportunityBucket[] = Array.from({ length: 24 }, (_, hour) => ({
@@ -504,13 +491,17 @@ function buildAnalytics(
     .sort((a, b) => a.key.localeCompare(b.key))
     .map((bucket) => {
       bucket.coveragePct = bucket.houseKwh > 0 ? (bucket.solarToHomeKwh / bucket.houseKwh) * 100 : 0;
-      bucket.selfConsumedPct = bucket.solarKwh > 0 ? (bucket.solarToHomeKwh / bucket.solarKwh) * 100 : 0;
+      bucket.selfConsumedPct = bucket.solarKwh > 0
+        ? clamp((bucket.solarToHomeKwh / bucket.solarKwh) * 100, 0, 100)
+        : 0;
       bucket.solarValue = bucket.solarSavings + bucket.exportRevenue + bucket.avoidedExceedanceValue;
       return bucket;
     });
 
   totals.coveragePct = totals.houseKwh > 0 ? (totals.solarToHomeKwh / totals.houseKwh) * 100 : 0;
-  totals.selfConsumedPct = totals.solarKwh > 0 ? (totals.solarToHomeKwh / totals.solarKwh) * 100 : 0;
+  totals.selfConsumedPct = totals.solarKwh > 0
+    ? clamp((totals.solarToHomeKwh / totals.solarKwh) * 100, 0, 100)
+    : 0;
   totals.solarValue = totals.solarSavings + totals.exportRevenue + totals.avoidedExceedanceValue;
 
   const heatmapValues = {
@@ -1290,10 +1281,10 @@ function renderIntradayProfileCard(state: AppState, analytics: AnalyticsBundle):
 
 function renderSolarCoverageCard(analytics: AnalyticsBundle, currency: string): string {
   const solarHomeShare = analytics.totals.solarKwh > 0
-    ? (analytics.totals.solarToHomeKwh / analytics.totals.solarKwh) * 100
+    ? clamp((analytics.totals.solarToHomeKwh / analytics.totals.solarKwh) * 100, 0, 100)
     : 0;
   const solarExportShare = analytics.totals.solarKwh > 0
-    ? (analytics.totals.exportKwh / analytics.totals.solarKwh) * 100
+    ? clamp((analytics.totals.exportKwh / analytics.totals.solarKwh) * 100, 0, 100)
     : 0;
 
   return `
@@ -1603,6 +1594,8 @@ function renderComparisonCard(
   const previous = buildAnalytics(
     state.analysisComparison.consumptionTimeseries,
     state.analysisComparison.productionTimeseries,
+    state.analysisComparison.gridImportTimeseries,
+    state.analysisComparison.marketExportTimeseries,
     config,
   );
   const maxLength = Math.max(current.daily.length, previous.daily.length, 1);
@@ -1758,7 +1751,13 @@ export function renderAnalysis(state: AppState): string {
     `;
   }
 
-  const analytics = buildAnalytics(consumptionTimeseries, productionTimeseries, config);
+  const analytics = buildAnalytics(
+    consumptionTimeseries,
+    productionTimeseries,
+    state.gridImportTimeseries,
+    state.marketExportTimeseries,
+    config,
+  );
   const currency = config.currency || "EUR";
 
   return `

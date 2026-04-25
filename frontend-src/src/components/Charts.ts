@@ -15,6 +15,7 @@ import "chartjs-adapter-date-fns";
 import zoomPlugin from "chartjs-plugin-zoom";
 import type { TimeseriesResponse, TimeseriesItem, PerMeterTimeseries } from "../api/leneda";
 import type { ChartTimeBucket } from "../utils/chartTime";
+import { buildEnergyFlowPoints } from "../utils/energyFlow";
 
 // Extend Chart.js plugin options to include our custom referenceLine plugin
 declare module "chart.js" {
@@ -45,6 +46,10 @@ export interface ChartOptions {
   onZoomChange?: (start: string, end: string) => void;
   /** Per-meter production data for stacked green-shade chart. */
   perMeterProduction?: PerMeterTimeseries[];
+  /** Actual billed net-grid timeseries from Leneda. */
+  gridImportTimeseries?: TimeseriesResponse | null;
+  /** Actual market-export timeseries from Leneda. */
+  marketExportTimeseries?: TimeseriesResponse | null;
   /** Keep the chart focused on an exact sub-range after re-rendering. */
   viewportStartMs?: number;
   viewportEndMs?: number;
@@ -90,42 +95,23 @@ function buildRawTimePoints(
 }
 
 function buildFlowBreakdown(
-  consumptionPoints: TimePoint[],
-  productionPoints: TimePoint[],
+  consumption: TimeseriesResponse,
+  production: TimeseriesResponse,
+  gridImport?: TimeseriesResponse | null,
+  marketExport?: TimeseriesResponse | null,
 ): FlowBreakdownPoint[] {
-  const pointMap = new Map<number, { consumption: number; production: number }>();
-
-  for (const point of consumptionPoints) {
-    const existing = pointMap.get(point.x) ?? { consumption: 0, production: 0 };
-    existing.consumption += Math.max(0, point.y);
-    pointMap.set(point.x, existing);
-  }
-
-  for (const point of productionPoints) {
-    const existing = pointMap.get(point.x) ?? { consumption: 0, production: 0 };
-    existing.production += Math.max(0, point.y);
-    pointMap.set(point.x, existing);
-  }
-
-  return [...pointMap.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([x, values]) => {
-      const consumption = Math.max(0, values.consumption);
-      const production = Math.max(0, values.production);
-      const solarToHome = Math.max(0, Math.min(consumption, production));
-      const gridImport = Math.max(0, consumption - solarToHome);
-      const solarExport = Math.max(0, production - solarToHome);
-
-      return {
-        x,
-        y: consumption,
-        consumption,
-        production,
-        solarToHome,
-        gridImport,
-        solarExport,
-      };
-    });
+  return buildEnergyFlowPoints(consumption, production, {
+    gridImport,
+    marketExport,
+  }).map((point) => ({
+    x: point.timestamp,
+    y: point.consumptionKw,
+    consumption: point.consumptionKw,
+    production: point.productionKw,
+    solarToHome: point.solarToHomeKw,
+    gridImport: point.gridImportKw,
+    solarExport: point.solarExportKw,
+  }));
 }
 
 function scaleFlowBreakdown(
@@ -514,12 +500,19 @@ export function renderEnergyChart(
     onZoomChange,
     consumptionView = "grid",
     perMeterProduction,
+    gridImportTimeseries,
+    marketExportTimeseries,
     viewportStartMs,
     viewportEndMs,
     timeBucket,
   } = options;
   const rawPoints = buildRawTimePoints(consumption.items, production.items);
-  const rawFlowBreakdown = buildFlowBreakdown(rawPoints.consumption, rawPoints.production);
+  const rawFlowBreakdown = buildFlowBreakdown(
+    consumption,
+    production,
+    gridImportTimeseries,
+    marketExportTimeseries,
+  );
   const rawTimestamps = rawFlowBreakdown.map((point) => point.x);
   const rawSpanMs = rawTimestamps.length > 1 ? Math.max(...rawTimestamps) - Math.min(...rawTimestamps) : 0;
   const selectedTimeBucket = timeBucket ?? getAutoTimeBucket(rawSpanMs);

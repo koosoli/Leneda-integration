@@ -88,6 +88,8 @@ export interface AnalysisComparisonData {
   end: string;
   consumptionTimeseries: TimeseriesResponse | null;
   productionTimeseries: TimeseriesResponse | null;
+  gridImportTimeseries: TimeseriesResponse | null;
+  marketExportTimeseries: TimeseriesResponse | null;
 }
 
 export interface AppState {
@@ -108,6 +110,8 @@ export interface AppState {
   rangeData: RangeData | null;
   consumptionTimeseries: TimeseriesResponse | null;
   productionTimeseries: TimeseriesResponse | null;
+  gridImportTimeseries: TimeseriesResponse | null;
+  marketExportTimeseries: TimeseriesResponse | null;
   perMeterProductionTimeseries: PerMeterTimeseriesResponse | null;
   sensors: SensorsResponse | null;
   config: BillingConfig | null;
@@ -250,6 +254,8 @@ export class LenedaApp {
     rangeData: null,
     consumptionTimeseries: null,
     productionTimeseries: null,
+    gridImportTimeseries: null,
+    marketExportTimeseries: null,
     perMeterProductionTimeseries: null,
     sensors: null,
     config: null,
@@ -335,6 +341,8 @@ export class LenedaApp {
     this.state.rangeData = null;
     this.state.consumptionTimeseries = null;
     this.state.productionTimeseries = null;
+    this.state.gridImportTimeseries = null;
+    this.state.marketExportTimeseries = null;
     this.state.perMeterProductionTimeseries = null;
     this.clearChartViewport();
     this.state.analysisComparison = null;
@@ -359,6 +367,35 @@ export class LenedaApp {
       console.warn("Per-meter production fetch failed:", error);
       return null;
     }
+  }
+
+  private async fetchEnergyFlowTimeseries(
+    start: string,
+    end: string,
+  ): Promise<{
+    consumptionTimeseries: TimeseriesResponse;
+    productionTimeseries: TimeseriesResponse;
+    gridImportTimeseries: TimeseriesResponse;
+    marketExportTimeseries: TimeseriesResponse;
+  }> {
+    const [
+      consumptionTimeseries,
+      productionTimeseries,
+      gridImportTimeseries,
+      marketExportTimeseries,
+    ] = await Promise.all([
+      fetchTimeseries("1-1:1.29.0", start, end),
+      fetchTimeseries("1-1:2.29.0", start, end),
+      fetchTimeseries("1-65:1.29.9", start, end),
+      fetchTimeseries("1-65:2.29.9", start, end),
+    ]);
+
+    return {
+      consumptionTimeseries,
+      productionTimeseries,
+      gridImportTimeseries,
+      marketExportTimeseries,
+    };
   }
 
   private resetAnalysisComparison(): void {
@@ -437,10 +474,12 @@ export class LenedaApp {
     }
 
     try {
-      const [comparisonConsumption, comparisonProduction] = await Promise.all([
-        fetchTimeseries("1-1:1.29.0", comparisonRange.start, comparisonRange.end),
-        fetchTimeseries("1-1:2.29.0", comparisonRange.start, comparisonRange.end),
-      ]);
+      const {
+        consumptionTimeseries: comparisonConsumption,
+        productionTimeseries: comparisonProduction,
+        gridImportTimeseries: comparisonGridImport,
+        marketExportTimeseries: comparisonMarketExport,
+      } = await this.fetchEnergyFlowTimeseries(comparisonRange.start, comparisonRange.end);
 
       if (key !== this.getCurrentRangeKey()) return;
 
@@ -451,6 +490,8 @@ export class LenedaApp {
         end: comparisonRange.end,
         consumptionTimeseries: comparisonConsumption,
         productionTimeseries: comparisonProduction,
+        gridImportTimeseries: comparisonGridImport,
+        marketExportTimeseries: comparisonMarketExport,
       };
     } catch (error) {
       console.warn("Comparison data fetch failed:", error);
@@ -482,14 +523,15 @@ export class LenedaApp {
         fetchConfig(),
       ]);
       const { start, end } = this.getDateRangeISO();
-      const [consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
-        fetchTimeseries("1-1:1.29.0", start, end),
-        fetchTimeseries("1-1:2.29.0", start, end),
+      const [energyFlowTimeseries, perMeterProductionTimeseries] = await Promise.all([
+        this.fetchEnergyFlowTimeseries(start, end),
         this.fetchPerMeterProductionForRange(config, start, end),
       ]);
       this.state.rangeData = rangeData;
-      this.state.consumptionTimeseries = consumptionTimeseries;
-      this.state.productionTimeseries = productionTimeseries;
+      this.state.consumptionTimeseries = energyFlowTimeseries.consumptionTimeseries;
+      this.state.productionTimeseries = energyFlowTimeseries.productionTimeseries;
+      this.state.gridImportTimeseries = energyFlowTimeseries.gridImportTimeseries;
+      this.state.marketExportTimeseries = energyFlowTimeseries.marketExportTimeseries;
       this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
       this.state.sensors = sensors;
       this.state.config = config;
@@ -530,15 +572,16 @@ export class LenedaApp {
     this.render();
     try {
       const { start, end } = this.getDateRangeISO();
-      const [rangeData, consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
+      const [rangeData, energyFlowTimeseries, perMeterProductionTimeseries] = await Promise.all([
         fetchRangeData(range),
-        fetchTimeseries("1-1:1.29.0", start, end),
-        fetchTimeseries("1-1:2.29.0", start, end),
+        this.fetchEnergyFlowTimeseries(start, end),
         this.fetchPerMeterProductionForRange(this.state.config, start, end),
       ]);
       this.state.rangeData = rangeData;
-      this.state.consumptionTimeseries = consumptionTimeseries;
-      this.state.productionTimeseries = productionTimeseries;
+      this.state.consumptionTimeseries = energyFlowTimeseries.consumptionTimeseries;
+      this.state.productionTimeseries = energyFlowTimeseries.productionTimeseries;
+      this.state.gridImportTimeseries = energyFlowTimeseries.gridImportTimeseries;
+      this.state.marketExportTimeseries = energyFlowTimeseries.marketExportTimeseries;
       this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
     } catch (e) {
       this.clearRangeStateWithError(e, "Missing data");
@@ -570,10 +613,9 @@ export class LenedaApp {
       const config = this.state.config;
       const startIso = toLocalOffsetIso(new Date(customStart + "T00:00:00"));
       const endIso = toLocalOffsetIso(new Date(customEnd + "T23:59:59.999"));
-      const [data, consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
+      const [data, energyFlowTimeseries, perMeterProductionTimeseries] = await Promise.all([
         dataPromise,
-        fetchTimeseries("1-1:1.29.0", startIso, endIso),
-        fetchTimeseries("1-1:2.29.0", startIso, endIso),
+        this.fetchEnergyFlowTimeseries(startIso, endIso),
         this.fetchPerMeterProductionForRange(config, startIso, endIso),
       ]);
       this.state.rangeData = {
@@ -595,8 +637,10 @@ export class LenedaApp {
         start: data.start ?? customStart,
         end: data.end ?? customEnd,
       };
-      this.state.consumptionTimeseries = consumptionTimeseries;
-      this.state.productionTimeseries = productionTimeseries;
+      this.state.consumptionTimeseries = energyFlowTimeseries.consumptionTimeseries;
+      this.state.productionTimeseries = energyFlowTimeseries.productionTimeseries;
+      this.state.gridImportTimeseries = energyFlowTimeseries.gridImportTimeseries;
+      this.state.marketExportTimeseries = energyFlowTimeseries.marketExportTimeseries;
       this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
     } catch (e) {
       this.clearRangeStateWithError(e, "Missing data");
@@ -1347,7 +1391,6 @@ export class LenedaApp {
   private async initChart(canvas: HTMLCanvasElement): Promise<void> {
     try {
       const { renderEnergyChart } = await import("./Charts");
-      const { fetchTimeseries } = await import("../api/leneda");
       const { start, end } = this.getDateRangeISO();
       const viewportStartMs = this.state.chartViewportStart
         ? new Date(this.state.chartViewportStart).getTime()
@@ -1358,13 +1401,18 @@ export class LenedaApp {
 
       let consumption = this.state.consumptionTimeseries;
       let production = this.state.productionTimeseries;
-      if (!consumption || !production) {
-        [consumption, production] = await Promise.all([
-          fetchTimeseries("1-1:1.29.0", start, end),
-          fetchTimeseries("1-1:2.29.0", start, end),
-        ]);
+      let gridImport = this.state.gridImportTimeseries;
+      let marketExport = this.state.marketExportTimeseries;
+      if (!consumption || !production || !gridImport || !marketExport) {
+        const energyFlowTimeseries = await this.fetchEnergyFlowTimeseries(start, end);
+        consumption = energyFlowTimeseries.consumptionTimeseries;
+        production = energyFlowTimeseries.productionTimeseries;
+        gridImport = energyFlowTimeseries.gridImportTimeseries;
+        marketExport = energyFlowTimeseries.marketExportTimeseries;
         this.state.consumptionTimeseries = consumption;
         this.state.productionTimeseries = production;
+        this.state.gridImportTimeseries = gridImport;
+        this.state.marketExportTimeseries = marketExport;
       }
 
       const referencePowerKw = this.state.config?.reference_power_kw ?? 0;
@@ -1392,6 +1440,8 @@ export class LenedaApp {
         unit: this.state.chartUnit,
         consumptionView: this.state.chartConsumptionView,
         referencePowerKw,
+        gridImportTimeseries: gridImport,
+        marketExportTimeseries: marketExport,
         perMeterProduction,
         viewportStartMs,
         viewportEndMs,
@@ -1429,9 +1479,8 @@ export class LenedaApp {
       const endDate = end.slice(0, 10);
       this.resetAnalysisComparison();
       const data = await fetchCustomData(start, end);
-      const [consumptionTimeseries, productionTimeseries, perMeterProductionTimeseries] = await Promise.all([
-        fetchTimeseries("1-1:1.29.0", start, end),
-        fetchTimeseries("1-1:2.29.0", start, end),
+      const [energyFlowTimeseries, perMeterProductionTimeseries] = await Promise.all([
+        this.fetchEnergyFlowTimeseries(start, end),
         this.fetchPerMeterProductionForRange(this.state.config, start, end),
       ]);
 
@@ -1460,8 +1509,10 @@ export class LenedaApp {
         start: data.start,
         end: data.end,
       };
-      this.state.consumptionTimeseries = consumptionTimeseries;
-      this.state.productionTimeseries = productionTimeseries;
+      this.state.consumptionTimeseries = energyFlowTimeseries.consumptionTimeseries;
+      this.state.productionTimeseries = energyFlowTimeseries.productionTimeseries;
+      this.state.gridImportTimeseries = energyFlowTimeseries.gridImportTimeseries;
+      this.state.marketExportTimeseries = energyFlowTimeseries.marketExportTimeseries;
       this.state.perMeterProductionTimeseries = perMeterProductionTimeseries;
       this.state.loading = false;
 

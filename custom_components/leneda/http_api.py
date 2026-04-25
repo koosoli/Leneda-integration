@@ -317,23 +317,26 @@ def _build_cached_preset_data(cd: dict[str, Any], range_type: str) -> dict[str, 
 
     consumption = float(cd.get(keys["consumption"], 0) or 0)
     production = float(cd.get(keys["production"], 0) or 0)
-    covered_by_production = float(cd.get(keys.get("shared_with_me"), 0) or 0) if keys.get("shared_with_me") else 0.0
-    shared_with_me = covered_by_production
-    solar_to_home = max(0.0, covered_by_production)
-    direct_solar_to_home = solar_to_home
+    shared = float(cd.get(keys.get("shared"), 0) or 0) if keys.get("shared") else 0.0
+    shared_with_me = float(cd.get(keys.get("shared_with_me"), 0) or 0) if keys.get("shared_with_me") else 0.0
+    market_export = float(cd.get(keys.get("exported"), 0) or 0) if keys.get("exported") else 0.0
+    direct_solar_to_home = float(cd.get(keys.get("self_consumed"), 0) or 0) if keys.get("self_consumed") else 0.0
+    if direct_solar_to_home <= 0 and production > 0:
+        direct_solar_to_home = max(0.0, production - shared - market_export)
+    solar_to_home = max(0.0, direct_solar_to_home + shared_with_me)
     remaining_consumption_key = PRESET_REMAINING_CONSUMPTION_KEYS.get(range_type)
     remaining_consumption = (
         float(cd.get(remaining_consumption_key, 0) or 0) if remaining_consumption_key else 0.0
     )
     grid_import = remaining_consumption if remaining_consumption > 0 else max(0.0, consumption - solar_to_home)
-    market_export = max(0.0, production - solar_to_home)
-    shared = 0.0
+    if market_export <= 0 and production > 0:
+        market_export = max(0.0, production - direct_solar_to_home - shared)
 
     return {
         "consumption": round(consumption, 4),
         "production": round(production, 4),
         "exported": round(market_export, 4),
-        "self_consumed": round(solar_to_home, 4),
+        "self_consumed": round(direct_solar_to_home, 4),
         "grid_import": round(grid_import, 4),
         "solar_to_home": round(solar_to_home, 4),
         "direct_solar_to_home": round(direct_solar_to_home, 4),
@@ -636,17 +639,24 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
     c_val = await _fetch_sum(consumption_routes, "1-1:1.29.0")
     p_val = await _fetch_sum(production_routes, "1-1:2.29.0")
     grid_import_val = await _fetch_sum(consumption_routes, "1-65:1.29.9")
+    market_export = await _fetch_sum(production_routes, "1-65:2.29.9")
     gas_energy = await _fetch_sum(gas_routes, "7-20:99.33.17")
     gas_volume = await _fetch_sum(gas_routes, "7-1:99.23.15")
 
-    swm_val = 0.0
-    for layer in SHARING_LAYERS:
-        swm_val += await _fetch_sum(consumption_routes, f"1-65:1.29.{layer}")
+    shared_with_me_results = await _aio.gather(*[
+        _fetch_sum(consumption_routes, f"1-65:1.29.{layer}")
+        for layer in SHARING_LAYERS
+    ])
+    shared_results = await _aio.gather(*[
+        _fetch_sum(production_routes, f"1-65:2.29.{layer}")
+        for layer in SHARING_LAYERS
+    ])
 
-    solar_to_home = max(0.0, swm_val)
-    direct_solar_to_home = solar_to_home
+    shared_with_me = sum(shared_with_me_results)
+    shared = sum(shared_results)
+    direct_solar_to_home = max(0.0, p_val - shared - market_export)
+    solar_to_home = max(0.0, direct_solar_to_home + shared_with_me)
     billed_grid_import = grid_import_val if grid_import_val > 0 else max(0, c_val - solar_to_home)
-    market_export = max(0.0, p_val - solar_to_home)
 
     peak_coordinator = _get_preferred_coordinator(hass, "consumption") or _get_first_coordinator(hass)
     peak_exceedance = await _fetch_peak_and_exceedance(peak_coordinator, start_dt, end_dt) if peak_coordinator else {
@@ -658,12 +668,12 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
         "consumption": round(c_val, 4),
         "production": round(p_val, 4),
         "exported": round(market_export, 4),
-        "self_consumed": round(solar_to_home, 4),
+        "self_consumed": round(direct_solar_to_home, 4),
         "grid_import": round(billed_grid_import, 4),
         "solar_to_home": round(solar_to_home, 4),
         "direct_solar_to_home": round(direct_solar_to_home, 4),
-        "shared": 0.0,
-        "shared_with_me": round(swm_val, 4),
+        "shared": round(shared, 4),
+        "shared_with_me": round(shared_with_me, 4),
         "gas_energy": round(gas_energy, 4),
         "gas_volume": round(gas_volume, 4),
         **peak_exceedance,
