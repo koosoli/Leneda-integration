@@ -9,12 +9,16 @@ import type {
   BillingConfig,
   ConsumptionRateWindow,
   DayGroup,
-  FeedInRate,
+  PerMeterTimeseries,
   ReferencePowerWindow,
   TimeseriesResponse,
 } from "../api/leneda";
 import { fmtDate, fmtDateLong, fmtDateTime, fmtNum } from "../utils/format";
 import { buildEnergyFlowPoints } from "../utils/energyFlow";
+import {
+  calculatePrioritySolarAllocation,
+  resolveProductionFeedInRates,
+} from "../utils/solarAllocation";
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HEATMAP_LABELS = {
@@ -130,6 +134,20 @@ interface AnalyticsBundle {
   worstDays: DailyBucket[];
 }
 
+interface OfficialSummaryStats {
+  consumptionKwh: number;
+  totalSolarCoverageKwh: number;
+  directSolarToHomeKwh: number;
+  communitySolarToHomeKwh: number;
+  exportedKwh: number;
+  billedGridImportKwh: number;
+  coveragePct: number;
+  selfConsumedPct: number;
+  totalSolarValue: number;
+  selfConsumptionAdvantage: number;
+  variableImportCost: number;
+}
+
 interface LineSeries {
   label: string;
   color: string;
@@ -243,28 +261,30 @@ function findReferenceWindow(
   );
 }
 
-function resolveAverageFeedInRate(config: BillingConfig): number {
-  const productionMeters = (config.meters ?? []).filter((meter) => meter.types.includes("production"));
-  const feedInRates: FeedInRate[] = config.feed_in_rates ?? [];
+function resolveEffectiveFeedInRate(
+  config: BillingConfig,
+  consumptionTimeseries: TimeseriesResponse | null | undefined,
+  perMeterProduction: PerMeterTimeseries[] | null | undefined,
+  officialSelfConsumedKwh?: number,
+  officialExportedKwh?: number,
+): number {
+  const priorityAllocation = calculatePrioritySolarAllocation(
+    config,
+    consumptionTimeseries,
+    perMeterProduction,
+    officialSelfConsumedKwh,
+    officialExportedKwh,
+  );
+  if (priorityAllocation && priorityAllocation.weightedExportRate > 0) {
+    return priorityAllocation.weightedExportRate;
+  }
 
-  if (!productionMeters.length) return config.feed_in_tariff ?? 0;
+  const validRates = resolveProductionFeedInRates(config)
+    .map((rate) => rate.rate)
+    .filter((rate) => Number.isFinite(rate) && rate >= 0);
 
-  const resolvedRates = productionMeters.map((meter) => {
-    const rateConfig = feedInRates.find((rate) => rate.meter_id === meter.id);
-    if (!rateConfig) return config.feed_in_tariff ?? 0;
-
-    const sensorOk =
-      rateConfig.mode === "sensor" &&
-      rateConfig.sensor_value != null &&
-      Number.isFinite(rateConfig.sensor_value);
-
-    if (sensorOk) return rateConfig.sensor_value ?? 0;
-    if (Number.isFinite(rateConfig.tariff)) return rateConfig.tariff;
-    return config.feed_in_tariff ?? 0;
-  }).filter((value) => Number.isFinite(value) && value >= 0);
-
-  if (!resolvedRates.length) return config.feed_in_tariff ?? 0;
-  return resolvedRates.reduce((sum, value) => sum + value, 0) / resolvedRates.length;
+  if (!validRates.length) return config.feed_in_tariff ?? 0;
+  return validRates.reduce((sum, rate) => sum + rate, 0) / validRates.length;
 }
 
 function buildIntervalPoints(
@@ -273,11 +293,11 @@ function buildIntervalPoints(
   gridImport: TimeseriesResponse | null | undefined,
   marketExport: TimeseriesResponse | null | undefined,
   config: BillingConfig,
+  feedInRate: number,
 ): IntervalPoint[] {
   const rateWindows = config.consumption_rate_windows ?? [];
   const referenceWindows = config.reference_power_windows ?? [];
   const defaultReferenceKw = config.reference_power_kw ?? 0;
-  const avgFeedInRate = resolveAverageFeedInRate(config);
   const exceedanceRateWithVat = (config.exceedance_rate ?? 0) * (1 + (config.vat_rate ?? 0));
 
   return buildEnergyFlowPoints(consumption, production, {
@@ -317,7 +337,7 @@ function buildIntervalPoints(
         overKw,
         avoidedOverKw,
         importRateWithVat,
-        feedInRate: avgFeedInRate,
+        feedInRate,
         exceedanceRateWithVat,
       };
     });
@@ -329,8 +349,16 @@ function buildAnalytics(
   gridImport: TimeseriesResponse | null | undefined,
   marketExport: TimeseriesResponse | null | undefined,
   config: BillingConfig,
+  feedInRate: number,
 ): AnalyticsBundle {
-  const points = buildIntervalPoints(consumption, production, gridImport, marketExport, config);
+  const points = buildIntervalPoints(
+    consumption,
+    production,
+    gridImport,
+    marketExport,
+    config,
+    feedInRate,
+  );
   const dailyMap = new Map<string, DailyBucket>();
   const hourlyExceedanceKwh = Array.from({ length: 24 }, () => 0);
   const hourlyOpportunity: HourOpportunityBucket[] = Array.from({ length: 24 }, (_, hour) => ({
@@ -1127,28 +1155,36 @@ function renderRangeControls(state: AppState): string {
   `;
 }
 
-function renderSummaryStats(analytics: AnalyticsBundle, currency: string): string {
+function renderSummaryStats(
+  analytics: AnalyticsBundle,
+  currency: string,
+  official: OfficialSummaryStats,
+): string {
+  const coverageMeta = official.communitySolarToHomeKwh > 0.01
+    ? `${fmtNum(official.totalSolarCoverageKwh)} kWh of ${fmtNum(official.consumptionKwh)} kWh usage covered, incl. ${fmtNum(official.communitySolarToHomeKwh)} kWh shared`
+    : `${fmtNum(official.totalSolarCoverageKwh)} kWh of ${fmtNum(official.consumptionKwh)} kWh usage covered`;
+
   return `
     <div class="analysis-stat-grid">
       <div class="analysis-stat-card">
         <span class="analysis-stat-label">Solar Coverage</span>
-        <strong class="analysis-stat-value">${fmtNum(analytics.totals.coveragePct, 1)}%</strong>
-        <span class="analysis-stat-meta">${fmtNum(analytics.totals.solarToHomeKwh)} kWh of ${fmtNum(analytics.totals.houseKwh)} kWh usage</span>
+        <strong class="analysis-stat-value">${fmtNum(official.coveragePct, 1)}%</strong>
+        <span class="analysis-stat-meta">${coverageMeta}</span>
       </div>
       <div class="analysis-stat-card">
         <span class="analysis-stat-label">Self-Consumed Solar</span>
-        <strong class="analysis-stat-value">${fmtNum(analytics.totals.selfConsumedPct, 1)}%</strong>
-        <span class="analysis-stat-meta">${fmtNum(analytics.totals.solarToHomeKwh)} kWh kept at home, ${fmtNum(analytics.totals.exportKwh)} kWh exported</span>
+        <strong class="analysis-stat-value">${fmtNum(official.selfConsumedPct, 1)}%</strong>
+        <span class="analysis-stat-meta">${fmtNum(official.directSolarToHomeKwh)} kWh kept from your own solar, ${fmtNum(official.exportedKwh)} kWh exported</span>
       </div>
       <div class="analysis-stat-card">
         <span class="analysis-stat-label">Total Solar Value</span>
-        <strong class="analysis-stat-value">${formatCurrency(analytics.totals.solarValue, currency)}</strong>
+        <strong class="analysis-stat-value">${formatCurrency(official.totalSolarValue, currency)}</strong>
         <span class="analysis-stat-meta">Savings plus export revenue plus avoided exceedance charges</span>
       </div>
       <div class="analysis-stat-card">
         <span class="analysis-stat-label">Self-Use vs Export</span>
-        <strong class="analysis-stat-value">${formatSignedCurrency(analytics.totals.selfConsumptionAdvantage, currency)}</strong>
-        <span class="analysis-stat-meta">${fmtNum(analytics.totals.solarToHomeKwh)} kWh kept on-site instead of exported</span>
+        <strong class="analysis-stat-value">${formatSignedCurrency(official.selfConsumptionAdvantage, currency)}</strong>
+        <span class="analysis-stat-meta">${fmtNum(official.directSolarToHomeKwh)} kWh kept on-site instead of exported</span>
       </div>
       <div class="analysis-stat-card">
         <span class="analysis-stat-label">Peak Net Grid</span>
@@ -1162,8 +1198,8 @@ function renderSummaryStats(analytics: AnalyticsBundle, currency: string): strin
       </div>
       <div class="analysis-stat-card">
         <span class="analysis-stat-label">Variable Import Cost</span>
-        <strong class="analysis-stat-value">${formatCurrency(analytics.totals.importCost, currency)}</strong>
-        <span class="analysis-stat-meta">Energy-only import charges from the selected period</span>
+        <strong class="analysis-stat-value">${formatCurrency(official.variableImportCost, currency)}</strong>
+        <span class="analysis-stat-meta">${fmtNum(official.billedGridImportKwh)} kWh billed from the grid during the selected period</span>
       </div>
     </div>
   `;
@@ -1591,12 +1627,20 @@ function renderComparisonCard(
     `;
   }
 
+  const previousFeedInRate = resolveEffectiveFeedInRate(
+    config,
+    state.analysisComparison.consumptionTimeseries,
+    null,
+    undefined,
+    undefined,
+  );
   const previous = buildAnalytics(
     state.analysisComparison.consumptionTimeseries,
     state.analysisComparison.productionTimeseries,
     state.analysisComparison.gridImportTimeseries,
     state.analysisComparison.marketExportTimeseries,
     config,
+    previousFeedInRate,
   );
   const maxLength = Math.max(current.daily.length, previous.daily.length, 1);
   const dayIndexLabels = Array.from({ length: maxLength }, (_, index) => `D${index + 1}`);
@@ -1751,14 +1795,78 @@ export function renderAnalysis(state: AppState): string {
     `;
   }
 
+  const consumptionKwh = Math.max(0, rangeData.consumption ?? 0);
+  const productionKwh = Math.max(0, rangeData.production ?? 0);
+  const exportedKwh = Math.max(0, rangeData.exported ?? 0);
+  const directSolarToHome = Math.max(
+    0,
+    rangeData.direct_solar_to_home ??
+      (rangeData.self_consumed && rangeData.self_consumed > 0 ? rangeData.self_consumed : 0),
+  );
+  const totalSolarCoverageKwh = Math.max(
+    0,
+    (rangeData.grid_import != null ? consumptionKwh - rangeData.grid_import : undefined) ??
+      rangeData.solar_to_home ??
+      directSolarToHome ??
+      (rangeData.self_consumed && rangeData.self_consumed > 0
+        ? rangeData.self_consumed
+        : productionKwh - exportedKwh),
+  );
+  const billedGridImportKwh = Math.max(
+    0,
+    rangeData.grid_import ?? (consumptionKwh - totalSolarCoverageKwh),
+  );
+  const communitySolarToHomeKwh = Math.max(0, totalSolarCoverageKwh - directSolarToHome);
+  const prioritySolarAllocation = calculatePrioritySolarAllocation(
+    config,
+    consumptionTimeseries,
+    state.perMeterProductionTimeseries?.meters ?? null,
+    directSolarToHome,
+    exportedKwh,
+  );
+  const effectiveFeedInRate = resolveEffectiveFeedInRate(
+    config,
+    consumptionTimeseries,
+    state.perMeterProductionTimeseries?.meters ?? null,
+    directSolarToHome,
+    exportedKwh,
+  );
   const analytics = buildAnalytics(
     consumptionTimeseries,
     productionTimeseries,
     state.gridImportTimeseries,
     state.marketExportTimeseries,
     config,
+    effectiveFeedInRate,
   );
   const currency = config.currency || "EUR";
+  const importRateWithVat =
+    (
+      (config.energy_variable_rate ?? 0) +
+      (config.network_variable_rate ?? 0) +
+      (config.electricity_tax_rate ?? 0) +
+      (config.compensation_fund_rate ?? 0)
+    ) * (1 + (config.vat_rate ?? 0));
+  const selfConsumedSavings = directSolarToHome * importRateWithVat;
+  const selfConsumptionExportEquivalent = prioritySolarAllocation
+    ? prioritySolarAllocation.totalSelfUseExportEquivalent
+    : directSolarToHome * effectiveFeedInRate;
+  const feedInRevenue = prioritySolarAllocation
+    ? prioritySolarAllocation.totalFeedInRevenue
+    : exportedKwh * effectiveFeedInRate;
+  const officialSummary: OfficialSummaryStats = {
+    consumptionKwh,
+    totalSolarCoverageKwh,
+    directSolarToHomeKwh: directSolarToHome,
+    communitySolarToHomeKwh,
+    exportedKwh,
+    billedGridImportKwh,
+    coveragePct: consumptionKwh > 0 ? clamp((totalSolarCoverageKwh / consumptionKwh) * 100, 0, 100) : 0,
+    selfConsumedPct: productionKwh > 0 ? clamp((directSolarToHome / productionKwh) * 100, 0, 100) : 0,
+    totalSolarValue: selfConsumedSavings + analytics.totals.avoidedExceedanceValue + feedInRevenue,
+    selfConsumptionAdvantage: selfConsumedSavings - selfConsumptionExportEquivalent,
+    variableImportCost: billedGridImportKwh * importRateWithVat,
+  };
 
   return `
     <section class="analysis-view">
@@ -1775,7 +1883,7 @@ export function renderAnalysis(state: AppState): string {
       </div>
 
       ${renderRangeControls(state)}
-      ${renderSummaryStats(analytics, currency)}
+      ${renderSummaryStats(analytics, currency, officialSummary)}
       ${renderDailyBreakdownCard(analytics)}
 
       <div class="analysis-grid">

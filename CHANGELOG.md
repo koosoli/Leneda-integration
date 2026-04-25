@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.9.2] - 2026-04-25
+
+### Bug Fixes
+- **Solar Summary Alignment:** Corrected the Charts summary cards and invoice solar wording so hotfix follow-up work now keeps chart-level solar coverage, self-use, export value, and invoice solar sections aligned to the same official range totals without changing the supplier bill estimate path.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.9.2`.
+
+
 ## [v2.9.1] - 2026-04-25
 
 ### Bug Fixes
