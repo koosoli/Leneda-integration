@@ -301,7 +301,7 @@ var ga=Object.defineProperty;var va=(t,e,a)=>e in t?ga(t,e,{enumerable:!0,config
             >${k.label}</button>
           `}).join(""),tt=t.chartUnit==="kw"?"kW uses the same detail presets as kWh, but keeps power values in interval bars so short spikes and dips stay visible.":"kWh keeps the aggregated period bars for totals.",Oe=`${t.chartConsumptionView==="house"?"Total Usage shows the full house load, with the solar-covered share highlighted in green and exports below zero. Use the detail presets and arrows above the graph to move through time.":t.chartConsumptionView==="solar_systems"?"PV Systems stacks each configured solar production meter so you can compare panel-system output like the Home Assistant Energy dashboard.":"Net Grid focuses on what still came from the grid after solar, with exports shown below zero. The reference limit in kW mode applies here."} ${tt}`,me=((e==null?void 0:e.exceedance_kwh)??0)>0?ce("warning"):ce("ok");return`
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.9.2</div>
+<div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.9.3</div>
 
       <!-- Range Selector -->
       <div class="range-selector">

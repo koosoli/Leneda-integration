@@ -469,7 +469,7 @@ async function fetchLiveAggregatedData(billingConfig, creds, startDate, endDate)
   }
 
   const solarToHome = Math.max(0, sharedWithMe);
-  const billedGridImport = gridImport > 0 ? gridImport : Math.max(0, consumption - solarToHome);
+  const billedGridImport = Math.max(0, gridImport);
   const exported = Math.max(0, production - solarToHome);
   const { startIso, endIso } = toDayBoundsIso(startDate, endDate);
   const peak = await computePeakAndExceedance(billingConfig, creds, startIso, endIso);

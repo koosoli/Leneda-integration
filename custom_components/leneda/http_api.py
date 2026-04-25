@@ -35,6 +35,7 @@ PRESET_RANGE_MAPPING: dict[str, dict[str, str | None]] = {
         "production": "p_04_yesterday_production",
         "exported": "p_09_yesterday_exported",
         "self_consumed": "p_12_yesterday_self_consumed",
+        "remaining_consumption": "s_c_rem_yesterday",
         "shared": "s_sent_yesterday",
         "shared_with_me": "s_received_yesterday",
         "gas_energy": "g_01_yesterday_consumption",
@@ -46,6 +47,7 @@ PRESET_RANGE_MAPPING: dict[str, dict[str, str | None]] = {
         "production": "p_05_weekly_production",
         "exported": "p_17_weekly_exported",
         "self_consumed": "p_18_weekly_self_consumed",
+        "remaining_consumption": "s_c_rem_weekly",
         "shared": "s_sent_weekly",
         "shared_with_me": "s_received_weekly",
         "gas_energy": "g_02_weekly_consumption",
@@ -57,6 +59,7 @@ PRESET_RANGE_MAPPING: dict[str, dict[str, str | None]] = {
         "production": "p_06_last_week_production",
         "exported": "p_10_last_week_exported",
         "self_consumed": "p_13_last_week_self_consumed",
+        "remaining_consumption": "s_c_rem_last_week",
         "shared": "s_sent_last_week",
         "shared_with_me": "s_received_last_week",
         "gas_energy": "g_03_last_week_consumption",
@@ -68,6 +71,7 @@ PRESET_RANGE_MAPPING: dict[str, dict[str, str | None]] = {
         "production": "p_07_monthly_production",
         "exported": "p_15_monthly_exported",
         "self_consumed": "p_16_monthly_self_consumed",
+        "remaining_consumption": "s_c_rem_monthly",
         "shared": "s_sent_monthly",
         "shared_with_me": "s_received_monthly",
         "gas_energy": "g_04_monthly_consumption",
@@ -79,20 +83,13 @@ PRESET_RANGE_MAPPING: dict[str, dict[str, str | None]] = {
         "production": "p_08_previous_month_production",
         "exported": "p_11_last_month_exported",
         "self_consumed": "p_14_last_month_self_consumed",
+        "remaining_consumption": "s_c_rem_last_month",
         "shared": "s_sent_last_month",
         "shared_with_me": "s_received_last_month",
         "gas_energy": "g_05_last_month_consumption",
         "gas_volume": "g_14_last_month_volume",
         "exceedance": "last_month_power_usage_over_reference",
     },
-}
-
-PRESET_REMAINING_CONSUMPTION_KEYS: dict[str, str | None] = {
-    "yesterday": None,
-    "this_week": None,
-    "last_week": None,
-    "this_month": None,
-    "last_month": "s_c_rem_last_month",
 }
 
 
@@ -324,11 +321,18 @@ def _build_cached_preset_data(cd: dict[str, Any], range_type: str) -> dict[str, 
     if direct_solar_to_home <= 0 and production > 0:
         direct_solar_to_home = max(0.0, production - shared - market_export)
     solar_to_home = max(0.0, direct_solar_to_home + shared_with_me)
-    remaining_consumption_key = PRESET_REMAINING_CONSUMPTION_KEYS.get(range_type)
-    remaining_consumption = (
-        float(cd.get(remaining_consumption_key, 0) or 0) if remaining_consumption_key else 0.0
+    remaining_consumption = None
+    remaining_consumption_key = keys.get("remaining_consumption")
+    if remaining_consumption_key and cd.get(remaining_consumption_key) is not None:
+        try:
+            remaining_consumption = max(0.0, float(cd.get(remaining_consumption_key) or 0))
+        except (TypeError, ValueError):
+            remaining_consumption = None
+    grid_import = (
+        remaining_consumption
+        if remaining_consumption is not None
+        else max(0.0, consumption - solar_to_home)
     )
-    grid_import = remaining_consumption if remaining_consumption > 0 else max(0.0, consumption - solar_to_home)
     if market_export <= 0 and production > 0:
         market_export = max(0.0, production - direct_solar_to_home - shared)
 
@@ -656,7 +660,7 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
     shared = sum(shared_results)
     direct_solar_to_home = max(0.0, p_val - shared - market_export)
     solar_to_home = max(0.0, direct_solar_to_home + shared_with_me)
-    billed_grid_import = grid_import_val if grid_import_val > 0 else max(0, c_val - solar_to_home)
+    billed_grid_import = max(0.0, grid_import_val)
 
     peak_coordinator = _get_preferred_coordinator(hass, "consumption") or _get_first_coordinator(hass)
     peak_exceedance = await _fetch_peak_and_exceedance(peak_coordinator, start_dt, end_dt) if peak_coordinator else {

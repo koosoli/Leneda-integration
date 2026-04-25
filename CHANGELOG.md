@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.9.3] - 2026-04-25
+
+### Bug Fixes
+- **Grid Import Alignment:** Switched yesterday, weekly, and current-month grid import back to Leneda's official remaining-consumption channel so open-period import values now match the platform instead of being reconstructed from solar coverage.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.9.3`.
+
+
 ## [v2.9.2] - 2026-04-25
 
 ### Bug Fixes

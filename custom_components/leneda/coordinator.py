@@ -268,6 +268,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
 
                 CONSUMPTION_CODE = "1-1:1.29.0"
                 PRODUCTION_CODE = "1-1:2.29.0"
+                IMPORT_CODE = "1-65:1.29.9"
                 EXPORT_CODE = "1-65:2.29.9"
                 GAS_ENERGY_CODE = "7-20:99.33.17"
                 GAS_VOLUME_CODE = "7-1:99.23.15"
@@ -330,6 +331,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, yesterday_start_dt, yesterday_end_dt
                     ),
+                    self.api_client.async_get_aggregated_metering_data(
+                        self._meter_for_obis(IMPORT_CODE), IMPORT_CODE, yesterday_start_dt, yesterday_end_dt
+                    ),
                     # Weekly (current week so far)
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, week_start_dt, effective_week_end
@@ -339,6 +343,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     ),
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, week_start_dt, effective_week_end
+                    ),
+                    self.api_client.async_get_aggregated_metering_data(
+                        self._meter_for_obis(IMPORT_CODE), IMPORT_CODE, week_start_dt, effective_week_end
                     ),
                     # Last Week
                     self.api_client.async_get_aggregated_metering_data(
@@ -350,6 +357,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, last_week_start_dt, last_week_end_dt
                     ),
+                    self.api_client.async_get_aggregated_metering_data(
+                        self._meter_for_obis(IMPORT_CODE), IMPORT_CODE, last_week_start_dt, last_week_end_dt
+                    ),
                     # Monthly (current month so far)
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, month_start_dt, effective_month_end
@@ -359,6 +369,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     ),
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, month_start_dt, effective_month_end
+                    ),
+                    self.api_client.async_get_aggregated_metering_data(
+                        self._meter_for_obis(IMPORT_CODE), IMPORT_CODE, month_start_dt, effective_month_end
                     ),
                     # Previous Month
                     self.api_client.async_get_aggregated_metering_data(
@@ -428,10 +441,10 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     ))
 
                 aggregated_keys = [
-                    "c_04_yesterday_consumption", "p_04_yesterday_production", "p_09_yesterday_exported",
-                    "c_05_weekly_consumption", "p_05_weekly_production", "p_17_weekly_exported",
-                    "c_06_last_week_consumption", "p_06_last_week_production", "p_10_last_week_exported",
-                    "c_07_monthly_consumption", "p_07_monthly_production", "p_15_monthly_exported",
+                    "c_04_yesterday_consumption", "p_04_yesterday_production", "p_09_yesterday_exported", "s_c_rem_yesterday",
+                    "c_05_weekly_consumption", "p_05_weekly_production", "p_17_weekly_exported", "s_c_rem_weekly",
+                    "c_06_last_week_consumption", "p_06_last_week_production", "p_10_last_week_exported", "s_c_rem_last_week",
+                    "c_07_monthly_consumption", "p_07_monthly_production", "p_15_monthly_exported", "s_c_rem_monthly",
                     "c_08_previous_month_consumption", "p_08_previous_month_production", "p_11_last_month_exported",
                 ]
                 gas_energy_keys = [

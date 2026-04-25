@@ -32,6 +32,7 @@ PERIOD_DATA_KEYS: dict[str, dict[str, str]] = {
         "production": "p_04_yesterday_production",
         "exported": "p_09_yesterday_exported",
         "self_consumed": "p_12_yesterday_self_consumed",
+        "remaining_consumption": "s_c_rem_yesterday",
         "gas_energy": "g_01_yesterday_consumption",
         "gas_volume": "g_10_yesterday_volume",
         "exceedance": "yesterdays_power_usage_over_reference",
@@ -41,6 +42,7 @@ PERIOD_DATA_KEYS: dict[str, dict[str, str]] = {
         "production": "p_07_monthly_production",
         "exported": "p_15_monthly_exported",
         "self_consumed": "p_16_monthly_self_consumed",
+        "remaining_consumption": "s_c_rem_monthly",
         "gas_energy": "g_04_monthly_consumption",
         "gas_volume": "g_13_monthly_volume",
         "exceedance": "current_month_power_usage_over_reference",
@@ -50,6 +52,7 @@ PERIOD_DATA_KEYS: dict[str, dict[str, str]] = {
         "production": "p_08_previous_month_production",
         "exported": "p_11_last_month_exported",
         "self_consumed": "p_14_last_month_self_consumed",
+        "remaining_consumption": "s_c_rem_last_month",
         "gas_energy": "g_05_last_month_consumption",
         "gas_volume": "g_14_last_month_volume",
         "exceedance": "last_month_power_usage_over_reference",
@@ -430,7 +433,18 @@ def calculate_financial_summary(
     sold_to_market = max(0.0, float(data.get(keys["exported"], 0) or 0))
     self_consumed = float(data.get(keys["self_consumed"], 0) or 0)
     solar_to_home = max(0.0, self_consumed if self_consumed > 0 else production - sold_to_market)
-    billed_consumption = max(0.0, consumption - solar_to_home)
+    remaining_consumption = None
+    remaining_consumption_key = keys.get("remaining_consumption")
+    if remaining_consumption_key and data.get(remaining_consumption_key) is not None:
+        try:
+            remaining_consumption = max(0.0, float(data.get(remaining_consumption_key) or 0))
+        except (TypeError, ValueError):
+            remaining_consumption = None
+    billed_consumption = (
+        remaining_consumption
+        if remaining_consumption is not None
+        else max(0.0, consumption - solar_to_home)
+    )
     exceedance_kwh = float(data.get(keys["exceedance"], 0) or 0)
     gas_energy = float(data.get(keys["gas_energy"], 0) or 0)
     gas_volume = float(data.get(keys["gas_volume"], 0) or 0)
