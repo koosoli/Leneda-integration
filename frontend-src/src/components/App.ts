@@ -1192,6 +1192,7 @@ export class LenedaApp {
         mode: string;
         tariff: number;
         sensor_entity: string;
+        display_name?: string;
         self_use_priority: number;
       }> = [];
       const ratePattern = /^feed_in_rate_(\d+)_(.+)$/;
@@ -1245,6 +1246,7 @@ export class LenedaApp {
           mode: mode,
           tariff: parseFloat(effectiveTariffStr ?? "0.08") || 0.08,
           sensor_entity: rm.sensor_entity ?? "",
+          display_name: (rm.display_name ?? "").trim(),
           self_use_priority: Math.max(1, parseInt(rm.self_use_priority ?? `${Number(idx) + 1}`, 10) || Number(idx) + 1),
         });
       }

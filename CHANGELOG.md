@@ -3,6 +3,17 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.10.0] - 2026-04-27
+
+### New Features
+- **Named Solar Systems:** Added optional per-production-meter solar system names in Settings, with fallback labels like `Solar 1 (12345678)` when no custom name is configured.
+- **Per-System Solar Value in Charts:** Added a per-system solar value breakdown to the Charts analysis view so each solar system now shows self-used energy, exported energy, self-use value, export value, and total tracked value.
+
+### Improvements
+- **Solar Label Consistency:** Reused the same resolved solar-system labels in the Invoice per-system solar sections so Charts and Invoice refer to each system consistently.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.10.0`.
+
+
 ## [v2.9.3] - 2026-04-25
 
 ### Bug Fixes

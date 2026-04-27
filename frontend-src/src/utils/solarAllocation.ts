@@ -8,6 +8,7 @@ import type {
 export interface ResolvedFeedInRate {
   meterId: string;
   shortId: string;
+  displayName: string;
   rate: number;
   label: string;
   mode: string;
@@ -34,6 +35,20 @@ function finiteOr(value: number | undefined | null, fallback: number): number {
   return Number.isFinite(value) ? Number(value) : fallback;
 }
 
+export function defaultSolarSystemName(meterId: string, index: number): string {
+  const suffix = meterId ? meterId.slice(-8) : "";
+  return suffix ? `Solar ${index} (${suffix})` : `Solar ${index}`;
+}
+
+export function resolveSolarSystemName(
+  meterId: string,
+  index: number,
+  configuredName?: string | null,
+): string {
+  const trimmedName = typeof configuredName === "string" ? configuredName.trim() : "";
+  return trimmedName || defaultSolarSystemName(meterId, index);
+}
+
 export function resolveProductionFeedInRates(config: BillingConfig): ResolvedFeedInRate[] {
   const productionMeters = (config.meters ?? []).filter((meter) => meter.types.includes("production"));
   const feedInRates: FeedInRate[] = config.feed_in_rates ?? [];
@@ -53,10 +68,12 @@ export function resolveProductionFeedInRates(config: BillingConfig): ResolvedFee
         1,
         Math.round(finiteOr(rateConfig?.self_use_priority, idx + 1)),
       );
+      const displayName = resolveSolarSystemName(meter.id, idx + 1, rateConfig?.display_name);
 
       return {
         meterId: meter.id,
         shortId: meter.id ? "…" + meter.id.slice(-8) : `Meter ${idx + 1}`,
+        displayName,
         rate: effectiveRate,
         label: sensorOk
           ? `Sensor (${effectiveRate.toFixed(4)} ${currency}/kWh)`

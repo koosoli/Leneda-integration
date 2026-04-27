@@ -18,6 +18,7 @@ import { buildEnergyFlowPoints } from "../utils/energyFlow";
 import {
   calculatePrioritySolarAllocation,
   resolveProductionFeedInRates,
+  type SolarAllocationResult,
 } from "../utils/solarAllocation";
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -1315,7 +1316,75 @@ function renderIntradayProfileCard(state: AppState, analytics: AnalyticsBundle):
   `;
 }
 
-function renderSolarCoverageCard(analytics: AnalyticsBundle, currency: string): string {
+function renderSolarSystemValueBreakdown(
+  allocation: SolarAllocationResult,
+  importRateWithVat: number,
+  currency: string,
+): string {
+  const subtotalSelfUseSavings = allocation.meters.reduce(
+    (sum, meter) => sum + meter.selfConsumedKwh * importRateWithVat,
+    0,
+  );
+  const subtotalValue = subtotalSelfUseSavings + allocation.totalFeedInRevenue;
+
+  return `
+    <div class="analysis-subchart">
+      <h4 class="analysis-subtitle">Per-system value breakdown</h4>
+      <div class="analysis-table-wrap">
+        <table class="analysis-table">
+          <thead>
+            <tr>
+              <th>System</th>
+              <th>Export tariff</th>
+              <th>Self-used</th>
+              <th>Exported</th>
+              <th>Self-use value</th>
+              <th>Export value</th>
+              <th>Total value</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${allocation.meters.map((meter) => {
+              const selfUseSavings = meter.selfConsumedKwh * importRateWithVat;
+              const totalValue = selfUseSavings + meter.revenue;
+              return `
+                <tr>
+                  <td>
+                    <strong>${meter.displayName}</strong>
+                    <div class="analysis-stat-meta">${meter.shortId} · priority ${meter.selfUsePriority}</div>
+                  </td>
+                  <td>${fmtNum(meter.rate, 4)} ${currency}/kWh</td>
+                  <td>${fmtNum(meter.selfConsumedKwh)} kWh</td>
+                  <td>${fmtNum(meter.exportedKwh)} kWh</td>
+                  <td>${formatCurrency(selfUseSavings, currency)}</td>
+                  <td>${formatCurrency(meter.revenue, currency)}</td>
+                  <td>${formatCurrency(totalValue, currency)}</td>
+                </tr>
+              `;
+            }).join("")}
+            <tr>
+              <td><strong>Portfolio subtotal</strong></td>
+              <td></td>
+              <td>${fmtNum(allocation.meters.reduce((sum, meter) => sum + meter.selfConsumedKwh, 0))} kWh</td>
+              <td>${fmtNum(allocation.meters.reduce((sum, meter) => sum + meter.exportedKwh, 0))} kWh</td>
+              <td>${formatCurrency(subtotalSelfUseSavings, currency)}</td>
+              <td>${formatCurrency(allocation.totalFeedInRevenue, currency)}</td>
+              <td>${formatCurrency(subtotalValue, currency)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="analysis-note">This subtotal includes self-use savings and export revenue. Avoided exceedance value stays only in the overall solar total because it depends on aggregate site load, not a single solar system.</p>
+    </div>
+  `;
+}
+
+function renderSolarCoverageCard(
+  analytics: AnalyticsBundle,
+  currency: string,
+  solarAllocation: SolarAllocationResult | null,
+  importRateWithVat: number,
+): string {
   const solarHomeShare = analytics.totals.solarKwh > 0
     ? clamp((analytics.totals.solarToHomeKwh / analytics.totals.solarKwh) * 100, 0, 100)
     : 0;
@@ -1357,6 +1426,7 @@ function renderSolarCoverageCard(analytics: AnalyticsBundle, currency: string): 
         <span><span class="analysis-legend-swatch" style="background:rgba(63, 185, 80, 0.85);"></span>Self-consumed: ${fmtNum(analytics.totals.solarToHomeKwh)} kWh</span>
         <span><span class="analysis-legend-swatch" style="background:rgba(88, 166, 255, 0.75);"></span>Exported: ${fmtNum(analytics.totals.exportKwh)} kWh</span>
       </div>
+      ${solarAllocation?.meters.length ? renderSolarSystemValueBreakdown(solarAllocation, importRateWithVat, currency) : ""}
       <div class="analysis-subchart">
         <h4 class="analysis-subtitle">Coverage of house usage by day</h4>
         ${renderLineChart({
@@ -1892,7 +1962,7 @@ export function renderAnalysis(state: AppState): string {
       </div>
 
       <div class="analysis-grid">
-        ${renderSolarCoverageCard(analytics, currency)}
+        ${renderSolarCoverageCard(analytics, currency, prioritySolarAllocation, importRateWithVat)}
         ${renderTariffOpportunityCard(analytics, currency)}
       </div>
 

@@ -486,8 +486,9 @@ export function renderInvoice(state: AppState): string {
             <tr class="section-label"><td colspan="3">Per-System Self-Use vs Export</td></tr>
             ${perSystemSolarRows.map((r) => `
             <tr>
-              <td>${r.shortId}</td>
+              <td>${r.displayName}</td>
               <td style="text-align: right;">
+                ${r.shortId}<br/>
                 Produced ${fmtKwh(r.producedKwh)} kWh<br/>
                 Kept on-site ${fmtKwh(r.selfConsumedKwh)} kWh<br/>
                 Sold ${fmtKwh(r.exportedKwh)} kWh<br/>
@@ -855,8 +856,8 @@ export function renderInvoice(state: AppState): string {
             <tr class="section-label"><td colspan="3">Credit Calculation</td></tr>
             ${feedInRows.map((r) => `
             <tr class="revenue-row">
-              <td>Exported (${hasMultipleRates ? r.shortId : fmtKwh(r.exportedKwh) + " kWh"})</td>
-              <td style="text-align: right;">${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>Self-use priority ${r.selfUsePriority}` : ""}</td>
+              <td>Exported (${hasMultipleRates ? r.displayName : fmtKwh(r.exportedKwh) + " kWh"})</td>
+              <td style="text-align: right;">${hasMultipleRates ? `${r.shortId}<br/>` : ""}${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>Self-use priority ${r.selfUsePriority}` : ""}</td>
               <td class="revenue-amount" style="text-align: right;">-${fmt(r.revenue)}</td>
             </tr>
             `).join("")}
@@ -1104,8 +1105,8 @@ export function renderInvoice(state: AppState): string {
             <tr class="section-label"><td colspan="3">Feed-in Revenue</td></tr>
             ${feedInRows.map((r) => `
             <tr>
-              <td>Sold to grid ${hasMultipleRates ? `(${r.shortId})` : `(${fmtKwh(r.exportedKwh)} kWh)`}</td>
-              <td style="text-align: right;">${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>Self-use priority ${r.selfUsePriority}` : ""}</td>
+              <td>Sold to grid ${hasMultipleRates ? `(${r.displayName})` : `(${fmtKwh(r.exportedKwh)} kWh)`}</td>
+              <td style="text-align: right;">${hasMultipleRates ? `${r.shortId}<br/>` : ""}${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>Self-use priority ${r.selfUsePriority}` : ""}</td>
               <td style="text-align: right;">${fmt(r.revenue)}</td>
             </tr>
             `).join("")}

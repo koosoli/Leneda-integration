@@ -18,6 +18,7 @@ import type {
   ReferencePowerWindow,
   DayGroup,
 } from "../api/leneda";
+import { resolveSolarSystemName } from "../utils/solarAllocation";
 
 interface Field {
   key: keyof BillingConfig;
@@ -441,6 +442,7 @@ export function renderSettings(
       mode: "fixed",
       tariff: config?.feed_in_tariff ?? 0.08,
       sensor_entity: "",
+      display_name: "",
       self_use_priority: productionMeters.findIndex((meter) => meter.id === meterId) + 1,
     };
   }
@@ -450,11 +452,25 @@ export function renderSettings(
     : productionMeters.map((m, idx) => {
       const r = rateFor(m.id);
       const shortId = m.id ? "…" + m.id.slice(-8) : `Meter ${idx + 1}`;
+      const displayName = resolveSolarSystemName(m.id, idx + 1, r.display_name);
       return `
           <div class="feed-in-meter-card" data-meter-idx="${idx}" data-meter-id="${m.id}">
             <div class="feed-in-meter-header">
-              <span class="meter-type-badge meter-type-production">☀️ ${shortId}</span>
+              <span class="meter-type-badge meter-type-production">☀️ ${displayName}</span>
+              <code style="font-size: var(--text-sm);">${shortId}</code>
               <input type="hidden" name="feed_in_rate_${idx}_meter_id" value="${m.id}" />
+            </div>
+            <div class="form-row">
+              <label for="cfg-feed_in_rate_${idx}_display_name">System Name</label>
+              <div class="input-group">
+                <input
+                  id="cfg-feed_in_rate_${idx}_display_name"
+                  name="feed_in_rate_${idx}_display_name"
+                  type="text"
+                  value="${r.display_name ?? ""}"
+                  placeholder="${resolveSolarSystemName(m.id, idx + 1)}"
+                />
+              </div>
             </div>
             <div class="form-row">
               <label for="cfg-feed_in_rate_${idx}_priority">Self-use Priority</label>
@@ -469,6 +485,9 @@ export function renderSettings(
                 />
                 <span class="input-unit">1 = used first at home</span>
               </div>
+              <p class="muted" style="font-size: var(--text-xs); margin-top: var(--sp-1);">
+                Leave blank to use ${resolveSolarSystemName(m.id, idx + 1)}.
+              </p>
             </div>
             <div class="form-row">
               <label>Pricing Mode</label>
