@@ -1336,6 +1336,7 @@ function renderSolarSystemValueBreakdown(
             <tr>
               <th>System</th>
               <th>Export tariff</th>
+              <th>Produced</th>
               <th>Self-used</th>
               <th>Exported</th>
               <th>Self-use value</th>
@@ -1354,6 +1355,7 @@ function renderSolarSystemValueBreakdown(
                     <div class="analysis-stat-meta">${meter.shortId} · priority ${meter.selfUsePriority}</div>
                   </td>
                   <td>${fmtNum(meter.rate, 4)} ${currency}/kWh</td>
+                  <td>${fmtNum(meter.producedKwh)} kWh</td>
                   <td>${fmtNum(meter.selfConsumedKwh)} kWh</td>
                   <td>${fmtNum(meter.exportedKwh)} kWh</td>
                   <td>${formatCurrency(selfUseSavings, currency)}</td>
@@ -1365,6 +1367,7 @@ function renderSolarSystemValueBreakdown(
             <tr>
               <td><strong>Portfolio subtotal</strong></td>
               <td></td>
+              <td>${fmtNum(allocation.meters.reduce((sum, meter) => sum + meter.producedKwh, 0))} kWh</td>
               <td>${fmtNum(allocation.meters.reduce((sum, meter) => sum + meter.selfConsumedKwh, 0))} kWh</td>
               <td>${fmtNum(allocation.meters.reduce((sum, meter) => sum + meter.exportedKwh, 0))} kWh</td>
               <td>${formatCurrency(subtotalSelfUseSavings, currency)}</td>

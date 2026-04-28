@@ -138,13 +138,18 @@ export function renderDashboard(state: AppState): string {
   const sharedWithMe = d?.shared_with_me ?? 0;
   const shared = d?.shared ?? 0;
   const soldToMarket = Math.max(0, exported);
+  const derivedSolarCoverage = d?.grid_import != null ? consumption - d.grid_import : undefined;
   const solarToHome = Math.max(
     0,
-    d?.solar_to_home ??
+    derivedSolarCoverage ??
+      d?.solar_to_home ??
       d?.direct_solar_to_home ??
       (reportedSelfConsumed > 0 ? reportedSelfConsumed : production - soldToMarket),
   );
-  const directSolarToHome = Math.max(0, d?.direct_solar_to_home ?? solarToHome);
+  const directSolarToHome = Math.max(
+    0,
+    d?.direct_solar_to_home ?? Math.max(0, solarToHome - sharedWithMe),
+  );
   const selfConsumed = solarToHome;
   const boughtFromGrid = Math.max(0, d?.grid_import ?? (consumption - solarToHome));
   const totalHomeEnergy = consumption > 0 ? consumption : boughtFromGrid + solarToHome;
@@ -360,7 +365,7 @@ export function renderDashboard(state: AppState): string {
         </g>
         <g transform="translate(90, 124)">
           <circle r="32" fill="var(--clr-overlay)" stroke="var(--clr-overlay-border)" stroke-width="2" />
-          <text text-anchor="middle" y="-4" class="house-core-kicker">Self-Suff.</text>
+          <text text-anchor="middle" y="-4" class="house-core-kicker">Solar Cover.</text>
           <text text-anchor="middle" y="18" class="house-core-value">${fmtNum(selfSufficiency, 0)}%</text>
         </g>
         <text x="90" y="262" text-anchor="middle" class="house-total-label">Home usage</text>
@@ -725,7 +730,7 @@ export function renderDashboard(state: AppState): string {
 
   return `
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.10.0</div>
+      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.10.1</div>
 
       <!-- Range Selector -->
       <div class="range-selector">
@@ -850,7 +855,7 @@ export function renderDashboard(state: AppState): string {
             </div>
 
             <div class="flow-scene-summary">
-              <span class="flow-scene-chip solar">Self-sufficient ${fmtNum(selfSufficiency, 0)}%</span>
+              <span class="flow-scene-chip solar">Solar coverage ${fmtNum(selfSufficiency, 0)}%</span>
               <span class="flow-scene-chip import">Grid import ${fmtNum(boughtFromGrid)} kWh</span>
               <span class="flow-scene-chip export">Export ${fmtNum(soldToMarket)} kWh</span>
               <span class="flow-scene-chip community">Community ${fmtNum(communityExchange)} kWh</span>
@@ -869,7 +874,7 @@ export function renderDashboard(state: AppState): string {
                 <span class="mobile-flow-kicker">House</span>
                 <strong class="mobile-flow-house-value">${fmtNum(totalHomeEnergy)} kWh supplied</strong>
                 <span class="mobile-flow-house-meta">
-                  ${fmtNum(selfSufficiency, 0)}% solar supplied${peakPower > 0 ? ` · Peak ${fmtNum(peakPower, 2)} kW` : ""}
+                  ${fmtNum(selfSufficiency, 0)}% of home usage solar-covered${peakPower > 0 ? ` · Peak ${fmtNum(peakPower, 2)} kW` : ""}
                 </span>
               </div>
 
@@ -970,7 +975,7 @@ export function renderDashboard(state: AppState): string {
         <div class="metrics-list">
           <div class="metric">
             <div class="metric-header">
-              <span class="metric-label">Self-Sufficiency</span>
+              <span class="metric-label">Solar Coverage</span>
               <span class="metric-value">${fmtNum(selfSufficiency, 1)}%</span>
             </div>
             <div class="metric-bar">

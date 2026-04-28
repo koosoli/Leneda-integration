@@ -3,6 +3,16 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.10.1] - 2026-04-28
+
+### Bug Fixes
+- **Solar Coverage Alignment:** Aligned the dashboard self-sufficiency display with the same official solar-coverage calculation used in Charts, so dashboard coverage now matches Leneda's billed grid-import path when available.
+- **Per-System Production Totals:** Added produced `kWh` to the Charts per-system solar value breakdown so each PV system now shows total generation alongside self-used and exported energy.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.10.1`.
+
+
 ## [v2.10.0] - 2026-04-27
 
 ### New Features
