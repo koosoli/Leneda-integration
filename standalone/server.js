@@ -460,29 +460,32 @@ async function fetchLiveAggregatedData(billingConfig, creds, startDate, endDate)
   const consumption = await fetchAggregatedSum(consumptionMeters, "1-1:1.29.0", startDate, endDate, aggregationLevel, creds);
   const production = await fetchAggregatedSum(productionMeters, "1-1:2.29.0", startDate, endDate, aggregationLevel, creds);
   const gridImport = await fetchAggregatedSum(consumptionMeters, "1-65:1.29.9", startDate, endDate, aggregationLevel, creds);
+  const marketExport = await fetchAggregatedSum(productionMeters, "1-65:2.29.9", startDate, endDate, aggregationLevel, creds);
   const gasEnergy = await fetchAggregatedSum(gasMeters, "7-20:99.33.17", startDate, endDate, aggregationLevel, creds);
   const gasVolume = await fetchAggregatedSum(gasMeters, "7-1:99.23.15", startDate, endDate, aggregationLevel, creds);
 
   let sharedWithMe = 0;
+  let shared = 0;
   for (const layer of ["1", "2", "3", "4"]) {
     sharedWithMe += await fetchAggregatedSum(consumptionMeters, `1-65:1.29.${layer}`, startDate, endDate, aggregationLevel, creds);
+    shared += await fetchAggregatedSum(productionMeters, `1-65:2.29.${layer}`, startDate, endDate, aggregationLevel, creds);
   }
 
-  const solarToHome = Math.max(0, sharedWithMe);
+  const directSolarToHome = Math.max(0, production - shared - marketExport);
+  const solarToHome = Math.max(0, directSolarToHome + sharedWithMe);
   const billedGridImport = Math.max(0, gridImport);
-  const exported = Math.max(0, production - solarToHome);
   const { startIso, endIso } = toDayBoundsIso(startDate, endDate);
   const peak = await computePeakAndExceedance(billingConfig, creds, startIso, endIso);
 
   return {
     consumption: round(consumption),
     production: round(production),
-    exported: round(exported),
-    self_consumed: round(solarToHome),
+    exported: round(Math.max(0, marketExport)),
+    self_consumed: round(directSolarToHome),
     grid_import: round(billedGridImport),
     solar_to_home: round(solarToHome),
-    direct_solar_to_home: round(solarToHome),
-    shared: 0,
+    direct_solar_to_home: round(directSolarToHome),
+    shared: round(shared),
     shared_with_me: round(sharedWithMe),
     gas_energy: round(gasEnergy),
     gas_volume: round(gasVolume),

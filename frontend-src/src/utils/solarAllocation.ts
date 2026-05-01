@@ -55,6 +55,7 @@ function resolveAllocationTargets(
   const requestedSelfConsumed = finiteOr(officialSelfConsumedKwh, rawSelfConsumed);
   const requestedExported = finiteOr(officialExportedKwh, rawExported);
   const combinedRequested = Math.max(0, requestedSelfConsumed) + Math.max(0, requestedExported);
+  const inferredSelfConsumedFromExport = Math.max(0, rawProduced - Math.max(0, requestedExported));
 
   if (rawProduced <= 0) {
     return { selfConsumedKwh: 0, exportedKwh: 0 };
@@ -62,7 +63,11 @@ function resolveAllocationTargets(
 
   if (combinedRequested <= rawProduced + 1e-6) {
     return {
-      selfConsumedKwh: clamp(Math.max(0, requestedSelfConsumed), 0, rawProduced),
+      selfConsumedKwh: clamp(
+        Math.max(Math.max(0, requestedSelfConsumed), inferredSelfConsumedFromExport),
+        0,
+        rawProduced,
+      ),
       exportedKwh: clamp(Math.max(0, requestedExported), 0, rawProduced),
     };
   }

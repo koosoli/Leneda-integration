@@ -3,11 +3,23 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.10.3] - 2026-05-01
+
+### Bug Fixes
+- **Per-System Self-Use Hotfix:** Corrected the invoice's per-system `Kept on-site` allocation so it follows the real 15-minute PV/house overlap and export balance instead of collapsing to underreported aggregate self-use totals.
+- **Standalone Aggregation Alignment:** Corrected the standalone proxy's year/custom solar aggregation so direct self-use, shared energy, and market export no longer get conflated in long-range invoice calculations.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.10.3`.
+
+
 ## [v2.10.2] - 2026-05-01
 
 ### Bug Fixes
 - **Per-System Solar Coverage Shading:** Split the dashboard `Net Grid` solar-covered bars into per-PV-system green shades so multi-system solar contribution is visible directly in the main graph instead of only in the separate `PV Systems` view.
 - **Solar Self-Use / Export Reconciliation:** Corrected priority-based solar allocation so invoice and analysis per-system self-use and export stay physically consistent with actual production for the selected period instead of independently over-scaling self-use and export totals.
+- **Standalone Year / Custom Solar Totals:** Corrected the standalone proxy's live aggregated range path so `this_year`, `last_year`, and long custom ranges now keep direct self-use, community sharing, and market export separate instead of treating received shared energy as all self-consumed solar.
+- **Per-System Self-Use Recovery:** Stopped underreported aggregate self-use values from collapsing the invoice's per-system `Kept on-site` allocation when the 15-minute production/consumption overlap and export balance show higher real self-use.
 
 ### Improvements
 - **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.10.2`.
