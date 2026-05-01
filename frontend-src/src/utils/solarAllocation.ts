@@ -31,8 +31,50 @@ export interface SolarAllocationResult {
   usedPriorityAllocation: boolean;
 }
 
+interface AllocationTargets {
+  selfConsumedKwh: number;
+  exportedKwh: number;
+}
+
 function finiteOr(value: number | undefined | null, fallback: number): number {
   return Number.isFinite(value) ? Number(value) : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function resolveAllocationTargets(
+  meters: SolarAllocationMeter[],
+  officialSelfConsumedKwh?: number,
+  officialExportedKwh?: number,
+): AllocationTargets {
+  const rawProduced = meters.reduce((sum, meter) => sum + meter.producedKwh, 0);
+  const rawSelfConsumed = meters.reduce((sum, meter) => sum + meter.selfConsumedKwh, 0);
+  const rawExported = meters.reduce((sum, meter) => sum + meter.exportedKwh, 0);
+  const requestedSelfConsumed = finiteOr(officialSelfConsumedKwh, rawSelfConsumed);
+  const requestedExported = finiteOr(officialExportedKwh, rawExported);
+  const combinedRequested = Math.max(0, requestedSelfConsumed) + Math.max(0, requestedExported);
+
+  if (rawProduced <= 0) {
+    return { selfConsumedKwh: 0, exportedKwh: 0 };
+  }
+
+  if (combinedRequested <= rawProduced + 1e-6) {
+    return {
+      selfConsumedKwh: clamp(Math.max(0, requestedSelfConsumed), 0, rawProduced),
+      exportedKwh: clamp(Math.max(0, requestedExported), 0, rawProduced),
+    };
+  }
+
+  const requestedSelfShare = combinedRequested > 0 ? Math.max(0, requestedSelfConsumed) / combinedRequested : 0;
+  const maxSelfConsumed = Math.min(rawProduced, Math.max(0, requestedSelfConsumed));
+  const scaledSelfConsumed = clamp(rawProduced * requestedSelfShare, 0, maxSelfConsumed);
+
+  return {
+    selfConsumedKwh: scaledSelfConsumed,
+    exportedKwh: Math.max(0, rawProduced - scaledSelfConsumed),
+  };
 }
 
 export function defaultSolarSystemName(meterId: string, index: number): string {
@@ -166,8 +208,9 @@ export function calculatePrioritySolarAllocation(
 
   const rawSelfConsumed = meters.reduce((sum, meter) => sum + meter.selfConsumedKwh, 0);
   const rawExported = meters.reduce((sum, meter) => sum + meter.exportedKwh, 0);
-  const targetSelfConsumed = Math.max(0, officialSelfConsumedKwh ?? rawSelfConsumed);
-  const targetExported = Math.max(0, officialExportedKwh ?? rawExported);
+  const targets = resolveAllocationTargets(meters, officialSelfConsumedKwh, officialExportedKwh);
+  const targetSelfConsumed = targets.selfConsumedKwh;
+  const targetExported = targets.exportedKwh;
   const selfScale = rawSelfConsumed > 0 ? targetSelfConsumed / rawSelfConsumed : 1;
   const exportScale = rawExported > 0 ? targetExported / rawExported : 1;
 

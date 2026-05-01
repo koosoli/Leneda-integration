@@ -78,6 +78,11 @@ interface SolarSystemSeries {
   displayPoints: TimePoint[];
 }
 
+interface SolarColor {
+  bg: string;
+  border: string;
+}
+
 /** Build raw 15-min TimePoints (kW) for display. */
 function buildRawTimePoints(
   consumptionItems: TimeseriesItem[],
@@ -399,6 +404,61 @@ function buildSolarSystemSeries(
   }];
 }
 
+function getSolarPalette(): SolarColor[] {
+  return [
+    { bg: "rgba(24, 112, 55, 0.88)", border: "#187037" },
+    { bg: "rgba(37, 140, 69, 0.82)", border: "#258c45" },
+    { bg: "rgba(63, 185, 80, 0.76)", border: "#3fb950" },
+    { bg: "rgba(102, 205, 126, 0.70)", border: "#66cd7e" },
+    { bg: "rgba(156, 224, 166, 0.68)", border: "#9ce0a6" },
+  ];
+}
+
+function buildSolarSystemCoverageSeries(
+  solarSystemSeries: SolarSystemSeries[],
+  flowBreakdown: FlowBreakdownPoint[],
+  unit: "kw" | "kwh",
+  granularity: ChartTimeBucket,
+): SolarSystemSeries[] {
+  if (!solarSystemSeries.length) return [];
+
+  const rawSeriesByMeter = new Map(
+    solarSystemSeries.map((series) => [
+      series.meterId,
+      new Map(series.rawPoints.map((point) => [point.x, point.y])),
+    ]),
+  );
+  const timestamps = [...new Set(flowBreakdown.map((point) => point.x))].sort((a, b) => a - b);
+  const rawCoverageByMeter = new Map<string, TimePoint[]>(
+    solarSystemSeries.map((series) => [series.meterId, []]),
+  );
+
+  for (const timestamp of timestamps) {
+    let remainingSolarToHomeKw = Math.max(
+      0,
+      flowBreakdown.find((point) => point.x === timestamp)?.solarToHome ?? 0,
+    );
+
+    for (const series of solarSystemSeries) {
+      const producedKw = Math.max(0, rawSeriesByMeter.get(series.meterId)?.get(timestamp) ?? 0);
+      const coveredKw = Math.min(remainingSolarToHomeKw, producedKw);
+      rawCoverageByMeter.get(series.meterId)?.push({ x: timestamp, y: coveredKw });
+      remainingSolarToHomeKw = Math.max(0, remainingSolarToHomeKw - coveredKw);
+    }
+  }
+
+  return solarSystemSeries
+    .map((series) => {
+      const rawPoints = rawCoverageByMeter.get(series.meterId) ?? [];
+      return {
+        ...series,
+        rawPoints,
+        displayPoints: prepareProductionDisplayPoints(rawPoints, unit, granularity),
+      };
+    })
+    .filter((series) => series.rawPoints.some((point) => point.y > 0.0001));
+}
+
 function getSymmetricAxisBound(value: number): number {
   if (value <= 0) return 1;
 
@@ -557,8 +617,16 @@ export function renderEnergyChart(
   const solarSystemSeries = isSolarSystemsView
     ? buildSolarSystemSeries(perMeterProduction, rawPoints.production, unit, selectedTimeBucket)
     : [];
+  const solarCoverageSeries = !isSolarSystemsView
+    ? buildSolarSystemCoverageSeries(
+      buildSolarSystemSeries(perMeterProduction, rawPoints.production, "kw", "quarter_hour"),
+      rawFlowBreakdown,
+      unit,
+      selectedTimeBucket,
+    )
+    : [];
   const solarSystemStackTotals = new Map<number, number>();
-  for (const series of solarSystemSeries) {
+  for (const series of isSolarSystemsView ? solarSystemSeries : solarCoverageSeries) {
     for (const point of series.displayPoints) {
       solarSystemStackTotals.set(point.x, (solarSystemStackTotals.get(point.x) ?? 0) + Math.max(0, point.y));
     }
@@ -640,13 +708,7 @@ export function renderEnergyChart(
     const raw = ctx.raw as TimePoint | undefined;
     return (raw?.y ?? 0) < 0 ? roundedBottomCorners : 0;
   };
-  const solarPalette = [
-    { bg: "rgba(63, 185, 80, 0.72)", border: "#3fb950" },
-    { bg: "rgba(210, 153, 34, 0.72)", border: "#d29922" },
-    { bg: "rgba(57, 197, 207, 0.66)", border: "#39c5cf" },
-    { bg: "rgba(255, 123, 114, 0.62)", border: "#ff7b72" },
-    { bg: "rgba(88, 166, 255, 0.62)", border: "#58a6ff" },
-  ];
+  const solarPalette = getSolarPalette();
   const solarSystemBarDatasets = solarSystemSeries.map((series, idx) => {
     const color = solarPalette[idx % solarPalette.length];
     return {
@@ -663,23 +725,41 @@ export function renderEnergyChart(
       order: idx + 1,
     };
   });
+  const solarCoverageDatasets = solarCoverageSeries.map((series, idx) => {
+    const color = solarPalette[idx % solarPalette.length];
+    return {
+      label: `${series.label} Covered (${yLabel})`,
+      data: series.displayPoints as any,
+      backgroundColor: color.bg,
+      borderColor: color.border,
+      borderWidth: 1,
+      borderRadius: solarStackBarRadius,
+      borderSkipped: false,
+      barPercentage,
+      grouped: false,
+      stack: energyBalanceStack,
+      order: idx + 1,
+    };
+  });
   const datasets = isSolarSystemsView
     ? solarSystemBarDatasets
     : isGridView
     ? [
-        {
-          label: `Covered by Solar (${yLabel})`,
-          data: solarToHomePoints as any,
-        backgroundColor: "rgba(63, 185, 80, 0.70)",
-        borderColor: "#3fb950",
-        borderWidth: 1,
-        borderRadius: solarStackBarRadius,
-        borderSkipped: false,
-        barPercentage,
-        grouped: false,
-        stack: energyBalanceStack,
-        order: 1,
-      },
+        ...(solarCoverageDatasets.length
+          ? solarCoverageDatasets
+          : [{
+              label: `Covered by Solar (${yLabel})`,
+              data: solarToHomePoints as any,
+              backgroundColor: "rgba(63, 185, 80, 0.70)",
+              borderColor: "#3fb950",
+              borderWidth: 1,
+              borderRadius: solarStackBarRadius,
+              borderSkipped: false,
+              barPercentage,
+              grouped: false,
+              stack: energyBalanceStack,
+              order: 1,
+            }]),
       {
         label: `From Grid (${yLabel})`,
         data: gridImportPoints as any,

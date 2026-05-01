@@ -3,6 +3,16 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.10.2] - 2026-05-01
+
+### Bug Fixes
+- **Per-System Solar Coverage Shading:** Split the dashboard `Net Grid` solar-covered bars into per-PV-system green shades so multi-system solar contribution is visible directly in the main graph instead of only in the separate `PV Systems` view.
+- **Solar Self-Use / Export Reconciliation:** Corrected priority-based solar allocation so invoice and analysis per-system self-use and export stay physically consistent with actual production for the selected period instead of independently over-scaling self-use and export totals.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.10.2`.
+
+
 ## [v2.10.1] - 2026-04-28
 
 ### Bug Fixes
