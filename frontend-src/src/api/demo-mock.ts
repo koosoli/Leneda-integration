@@ -167,6 +167,7 @@ function defaultBilling(): BillingConfig {
     gas_vat_rate: 0.08,
     compensation_fund_rate: -0.001,
     electricity_tax_rate: 0.001,
+    domiciliation_discount: 1.0,
     connect_discount: 0.5,
     vat_rate: 0.08,
     currency: "EUR",

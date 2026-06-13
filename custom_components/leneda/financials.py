@@ -502,6 +502,7 @@ def calculate_financial_summary(
         + meter_fees_total
         + billed_consumption * float(billing_config.compensation_fund_rate or 0.0)
         + billed_consumption * float(billing_config.electricity_tax_rate or 0.0)
+        - max(0.0, float(getattr(billing_config, "domiciliation_discount", 0.0) or 0.0)) * pro_factor
         - max(0.0, float(billing_config.connect_discount or 0.0)) * pro_factor
     )
     total_costs = subtotal_costs * (1 + float(billing_config.vat_rate or 0.0))

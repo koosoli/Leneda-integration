@@ -3,6 +3,16 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.11.0] - 2026-06-13
+
+### Bug Fixes
+- **Export Meter Role:** Added a dedicated `Grid Export / Sold to Grid` meter role so export-only Leneda metering points no longer inflate raw solar production totals.
+- **Grid Import Fallback:** Prevented missing or zero remaining-consumption data from collapsing invoice `Bought from grid` to `0 kWh` when no solar/community coverage exists.
+
+### Improvements
+- **SUDenergie Discounts:** Added a domiciliation discount setting alongside the electronic invoice discount so SUDenergie monthly bills with `-1 EUR/mo` and `-0.50 EUR/mo` credits can be matched.
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.11.0`.
+
 ## [v2.10.3] - 2026-05-01
 
 ### Bug Fixes

@@ -72,10 +72,12 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
         # Default all to primary meter, then override per type
         self.consumption_meter = metering_point_id
         self.production_meter = metering_point_id
+        self.export_meter = metering_point_id
         self.gas_meter = metering_point_id
 
         # Collect ALL meters of each type (for multi-production-meter summing)
         self.production_meters: list[str] = []
+        self.export_meters: list[str] = []
 
         for mid, types in meters:
             if "consumption" in types:
@@ -83,6 +85,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
             if "production" in types:
                 self.production_meter = mid
                 self.production_meters.append(mid)
+            if "export" in types:
+                self.export_meter = mid
+                self.export_meters.append(mid)
             if "gas" in types:
                 self.gas_meter = mid
 
@@ -92,6 +97,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
         # Keep production_meter pointing to the FIRST production meter so that
         # _meter_for_obis() returns [0] and extra tasks cover [1:].
         self.production_meter = self.production_meters[0]
+        if not self.export_meters:
+            self.export_meters = list(self.production_meters)
+        self.export_meter = self.export_meters[0]
 
         # Derive whether gas is available (new type system OR legacy meter_has_gas)
         self.has_gas = (
@@ -113,9 +121,10 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
         """
         if obis_code.startswith("7-"):
             return self.gas_meter
+        if obis_code.startswith("1-65:2."):
+            return self.export_meter
         if (obis_code.startswith("1-1:2.") or
-            obis_code.startswith("1-1:4.") or
-            obis_code.startswith("1-65:2.")):
+            obis_code.startswith("1-1:4.")):
             return self.production_meter
         return self.consumption_meter
 
@@ -385,24 +394,28 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     ),
                 ]
 
-                # Extra tasks for additional production meters (multi-solar summing)
+                # Extra tasks for additional production/export meters.
                 extra_prod_tasks = []
                 extra_prod_map = []  # maps each extra task result to its data key
+                period_ranges = [
+                    (yesterday_start_dt, yesterday_end_dt, "p_04_yesterday_production", "p_09_yesterday_exported"),
+                    (week_start_dt, effective_week_end, "p_05_weekly_production", "p_17_weekly_exported"),
+                    (last_week_start_dt, last_week_end_dt, "p_06_last_week_production", "p_10_last_week_exported"),
+                    (month_start_dt, effective_month_end, "p_07_monthly_production", "p_15_monthly_exported"),
+                    (start_of_last_month, end_of_last_month, "p_08_previous_month_production", "p_11_last_month_exported"),
+                ]
                 if len(self.production_meters) > 1:
                     _LOGGER.debug("Setting up extra tasks for %d additional production meters", len(self.production_meters) - 1)
-                    period_ranges = [
-                        (yesterday_start_dt, yesterday_end_dt, "p_04_yesterday_production", "p_09_yesterday_exported"),
-                        (week_start_dt, effective_week_end, "p_05_weekly_production", "p_17_weekly_exported"),
-                        (last_week_start_dt, last_week_end_dt, "p_06_last_week_production", "p_10_last_week_exported"),
-                        (month_start_dt, effective_month_end, "p_07_monthly_production", "p_15_monthly_exported"),
-                        (start_of_last_month, end_of_last_month, "p_08_previous_month_production", "p_11_last_month_exported"),
-                    ]
                     for meter_id in self.production_meters[1:]:
                         for start, end, prod_key, export_key in period_ranges:
                             extra_prod_tasks.append(self.api_client.async_get_aggregated_metering_data(
                                 meter_id, PRODUCTION_CODE, start, end
                             ))
                             extra_prod_map.append(prod_key)
+                if len(self.export_meters) > 1:
+                    _LOGGER.debug("Setting up extra tasks for %d additional export meters", len(self.export_meters) - 1)
+                    for meter_id in self.export_meters[1:]:
+                        for start, end, prod_key, export_key in period_ranges:
                             extra_prod_tasks.append(self.api_client.async_get_aggregated_metering_data(
                                 meter_id, EXPORT_CODE, start, end
                             ))
@@ -648,9 +661,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                 # Consumption meter for Shared With Me
                 c_meter = self._meter_for_obis("1-1:1.29.0")
                 
-                # Production meter(s) for Shared (Sent)
-                # Note: If multiple production meters exist, we should sum them all.
-                p_meters = self.production_meters
+                # Export meter(s) for Shared (Sent). If no export meter is configured,
+                # export_meters falls back to production_meters for legacy setups.
+                p_meters = self.export_meters
 
                 sharing_periods = [
                     ("yesterday", yesterday_start_dt, yesterday_end_dt),

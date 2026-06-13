@@ -301,9 +301,14 @@ export function renderInvoice(state: AppState): string {
   const production = d.production || 0;
   const exported = d.exported || 0;
   const soldToMarket = Math.max(0, exported);
+  const reportedGridImport = d.grid_import;
+  const hasIndependentSolarCoverage =
+    (d.solar_to_home ?? d.direct_solar_to_home ?? d.self_consumed ?? production) > 0;
+  const canDeriveSolarFromGridImport =
+    reportedGridImport != null && !(reportedGridImport <= 0 && consumption > 0 && !hasIndependentSolarCoverage);
   const totalSolarToHome = Math.max(
     0,
-    (d.grid_import != null ? consumption - d.grid_import : undefined) ??
+    (canDeriveSolarFromGridImport ? consumption - reportedGridImport : undefined) ??
       d.solar_to_home ??
       d.direct_solar_to_home ??
       (d.self_consumed && d.self_consumed > 0 ? d.self_consumed : production - soldToMarket),
@@ -314,7 +319,12 @@ export function renderInvoice(state: AppState): string {
       (d.self_consumed && d.self_consumed > 0 ? d.self_consumed : production - soldToMarket),
   ));
   const communitySolarToHome = Math.max(0, totalSolarToHome - directSolarToHome);
-  const billedConsumption = Math.max(0, d.grid_import ?? (consumption - totalSolarToHome));
+  const billedConsumption = Math.max(
+    0,
+    reportedGridImport != null && !(reportedGridImport <= 0 && consumption > 0 && totalSolarToHome <= 0)
+      ? reportedGridImport
+      : consumption - totalSolarToHome,
+  );
   const peakPower = d.peak_power_kw || 0;
   const refPower = config.reference_power_kw || 5;
   // Cumulative kWh consumed above reference power (sum of 15-min overage × 0.25 h)
@@ -375,6 +385,7 @@ export function renderInvoice(state: AppState): string {
   // 4. Taxes & levies
   const compensationCredit = billedConsumption * config.compensation_fund_rate;
   const electricityTax = billedConsumption * config.electricity_tax_rate;
+  const domiciliationDiscount = Math.max(0, config.domiciliation_discount ?? 0) * proFactor;
   const connectDiscount = Math.max(0, config.connect_discount ?? 0) * proFactor;
 
   // 5. Subtotal (costs) — fixed fees are prorated
@@ -388,6 +399,7 @@ export function renderInvoice(state: AppState): string {
     meterFeesTotal +
     compensationCredit +
     electricityTax -
+    domiciliationDiscount -
     connectDiscount;
 
   const vat = subtotalCosts * config.vat_rate;
@@ -801,13 +813,22 @@ export function renderInvoice(state: AppState): string {
               <td style="text-align: right;">${fmtNum(config.electricity_tax_rate, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(electricityTax)}</td>
             </tr>
-            ${connectDiscount > 0 ? `
+            ${domiciliationDiscount > 0 || connectDiscount > 0 ? `
             <tr class="section-label"><td colspan="3">Discounts</td></tr>
+            ${domiciliationDiscount > 0 ? `
             <tr>
-              <td>Monthly Discount <span class="muted">(${proLabel})</span></td>
+              <td>Domiciliation Discount <span class="muted">(${proLabel})</span></td>
+              <td style="text-align: right;">-${fmtNum(Math.max(0, config.domiciliation_discount ?? 0), 2)} ${currency}/mo</td>
+              <td style="text-align: right;">-${fmt(domiciliationDiscount)}</td>
+            </tr>
+            ` : ""}
+            ${connectDiscount > 0 ? `
+            <tr>
+              <td>Electronic Invoice Discount <span class="muted">(${proLabel})</span></td>
               <td style="text-align: right;">-${fmtNum(Math.max(0, config.connect_discount ?? 0), 2)} ${currency}/mo</td>
               <td style="text-align: right;">-${fmt(connectDiscount)}</td>
             </tr>
+            ` : ""}
             ` : ""}
 
             <tr class="subtotal-row">

@@ -203,6 +203,7 @@ def _get_meter_routes(hass: HomeAssistant) -> dict[str, list[dict[str, Any]]]:
     routes: dict[str, list[dict[str, Any]]] = {
         "consumption": [],
         "production": [],
+        "export": [],
         "gas": [],
     }
     seen: set[tuple[str, str]] = set()
@@ -245,6 +246,14 @@ def _get_meter_routes(hass: HomeAssistant) -> dict[str, list[dict[str, Any]]]:
                     "coordinator": preferred,
                 }
             )
+        if not routes["export"] and getattr(preferred, "export_meter", ""):
+            routes["export"].append(
+                {
+                    "meter_id": preferred.export_meter,
+                    "api_client": preferred.api_client,
+                    "coordinator": preferred,
+                }
+            )
         if not routes["gas"] and getattr(preferred, "has_gas", False) and getattr(preferred, "gas_meter", ""):
             routes["gas"].append(
                 {
@@ -262,7 +271,9 @@ def _routes_for_obis(hass: HomeAssistant, obis: str) -> list[dict[str, Any]]:
     routes = _get_meter_routes(hass)
     if obis.startswith("7-"):
         return routes["gas"]
-    if obis.startswith("1-1:2.") or obis.startswith("1-1:4.") or obis.startswith("1-65:2."):
+    if obis.startswith("1-65:2."):
+        return routes["export"] or routes["production"]
+    if obis.startswith("1-1:2.") or obis.startswith("1-1:4."):
         return routes["production"]
     return routes["consumption"]
 
@@ -306,6 +317,18 @@ def _nonzero_or_fallback(value: Any, fallback: float) -> float:
     return numeric if abs(numeric) > 1e-9 or abs(fallback) <= 1e-9 else fallback
 
 
+def _safe_grid_import(consumption: float, solar_to_home: float, reported_grid_import: float | None) -> float:
+    """Use reported grid import unless a zero value clearly means missing data."""
+    consumption = max(0.0, float(consumption or 0.0))
+    solar_to_home = max(0.0, float(solar_to_home or 0.0))
+    if reported_grid_import is None:
+        return max(0.0, consumption - solar_to_home)
+    grid_import = max(0.0, float(reported_grid_import or 0.0))
+    if grid_import <= 1e-9 and consumption > 1e-9 and solar_to_home <= 1e-9:
+        return consumption
+    return grid_import
+
+
 def _build_cached_preset_data(cd: dict[str, Any], range_type: str) -> dict[str, Any] | None:
     """Build preset-range data from coordinator cache, including derived flow fields."""
     keys = PRESET_RANGE_MAPPING.get(range_type)
@@ -328,11 +351,7 @@ def _build_cached_preset_data(cd: dict[str, Any], range_type: str) -> dict[str, 
             remaining_consumption = max(0.0, float(cd.get(remaining_consumption_key) or 0))
         except (TypeError, ValueError):
             remaining_consumption = None
-    grid_import = (
-        remaining_consumption
-        if remaining_consumption is not None
-        else max(0.0, consumption - solar_to_home)
-    )
+    grid_import = _safe_grid_import(consumption, solar_to_home, remaining_consumption)
     if market_export <= 0 and production > 0:
         market_export = max(0.0, production - direct_solar_to_home - shared)
 
@@ -633,9 +652,11 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
                 _LOGGER.error("Error fetching aggregated data for %s: %s", obis, result)
         return total
 
-    consumption_routes = _get_meter_routes(hass)["consumption"]
-    production_routes = _get_meter_routes(hass)["production"]
-    gas_routes = _get_meter_routes(hass)["gas"]
+    routes = _get_meter_routes(hass)
+    consumption_routes = routes["consumption"]
+    production_routes = routes["production"]
+    export_routes = routes["export"] or production_routes
+    gas_routes = routes["gas"]
 
     # Shared layers (1-4)
     SHARING_LAYERS = ["1", "2", "3", "4"]
@@ -643,7 +664,7 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
     c_val = await _fetch_sum(consumption_routes, "1-1:1.29.0")
     p_val = await _fetch_sum(production_routes, "1-1:2.29.0")
     grid_import_val = await _fetch_sum(consumption_routes, "1-65:1.29.9")
-    market_export = await _fetch_sum(production_routes, "1-65:2.29.9")
+    market_export = await _fetch_sum(export_routes, "1-65:2.29.9")
     gas_energy = await _fetch_sum(gas_routes, "7-20:99.33.17")
     gas_volume = await _fetch_sum(gas_routes, "7-1:99.23.15")
 
@@ -652,7 +673,7 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
         for layer in SHARING_LAYERS
     ])
     shared_results = await _aio.gather(*[
-        _fetch_sum(production_routes, f"1-65:2.29.{layer}")
+        _fetch_sum(export_routes, f"1-65:2.29.{layer}")
         for layer in SHARING_LAYERS
     ])
 
@@ -660,7 +681,7 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
     shared = sum(shared_results)
     direct_solar_to_home = max(0.0, p_val - shared - market_export)
     solar_to_home = max(0.0, direct_solar_to_home + shared_with_me)
-    billed_grid_import = max(0.0, grid_import_val)
+    billed_grid_import = _safe_grid_import(c_val, solar_to_home, grid_import_val)
 
     peak_coordinator = _get_preferred_coordinator(hass, "consumption") or _get_first_coordinator(hass)
     peak_exceedance = await _fetch_peak_and_exceedance(peak_coordinator, start_dt, end_dt) if peak_coordinator else {

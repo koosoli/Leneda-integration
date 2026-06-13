@@ -94,7 +94,7 @@ export interface SensorsResponse {
   metering_point: string;
 }
 
-export type MeterType = "consumption" | "production" | "gas";
+export type MeterType = "consumption" | "production" | "export" | "gas";
 
 export interface MeterConfig {
   id: string;
@@ -166,6 +166,8 @@ export interface BillingConfig {
   gas_vat_rate: number;
   compensation_fund_rate: number;
   electricity_tax_rate: number;
+  /** Positive monthly direct-debit credit applied before VAT. */
+  domiciliation_discount?: number;
   /** Positive monthly credit applied before VAT. */
   connect_discount: number;
   vat_rate: number;

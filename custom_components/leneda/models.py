@@ -17,7 +17,8 @@ class BillingConfig:
     - feed_in_tariff: compensation per kWh sold back to the grid
     - compensation_fund_rate: renewable energy fund levy (often negative = credit)
     - electricity_tax_rate: government tax per kWh
-    - connect_discount: monthly contract discount/credit applied before VAT
+    - domiciliation_discount: monthly direct-debit discount applied before VAT
+    - connect_discount: monthly electronic-invoice discount/credit applied before VAT
     - vat_rate: VAT as decimal (0.08 = 8%)
     """
     energy_fixed_fee: float = 3.50
@@ -40,6 +41,7 @@ class BillingConfig:
     gas_vat_rate: float = 0.08
     compensation_fund_rate: float = -0.0010
     electricity_tax_rate: float = 0.0010
+    domiciliation_discount: float = 1.00
     connect_discount: float = 0.50
     vat_rate: float = 0.08
     currency: str = "EUR"
@@ -73,6 +75,7 @@ class BillingConfig:
             "gas_vat_rate": self.gas_vat_rate,
             "compensation_fund_rate": self.compensation_fund_rate,
             "electricity_tax_rate": self.electricity_tax_rate,
+            "domiciliation_discount": self.domiciliation_discount,
             "connect_discount": self.connect_discount,
             "vat_rate": self.vat_rate,
             "currency": self.currency,
@@ -107,6 +110,7 @@ class BillingConfig:
             gas_vat_rate=cls._coerce_float(migrated.get("gas_vat_rate"), 0.08),
             compensation_fund_rate=cls._coerce_float(migrated.get("compensation_fund_rate"), -0.0010),
             electricity_tax_rate=cls._coerce_float(migrated.get("electricity_tax_rate"), 0.0010),
+            domiciliation_discount=cls._coerce_float(migrated.get("domiciliation_discount"), 1.00),
             connect_discount=cls._coerce_float(migrated.get("connect_discount"), 0.50),
             vat_rate=cls._coerce_float(migrated.get("vat_rate"), 0.08),
             currency=cls._coerce_str(migrated.get("currency"), "EUR"),
@@ -148,6 +152,7 @@ class BillingConfig:
             "exceedance_rate": 0.1139,
             "compensation_fund_rate": 0.0010,
             "electricity_tax_rate": 0.0010,
+            "domiciliation_discount": 0.0,
             "connect_discount": 0.0,
             "vat_rate": 0.08,
         }
@@ -159,6 +164,7 @@ class BillingConfig:
                 "network_power_ref_rate": 19.61,
                 "exceedance_rate": 0.0765,
                 "compensation_fund_rate": -0.0010,
+                "domiciliation_discount": 1.00,
                 "connect_discount": 0.50,
             })
         return migrated

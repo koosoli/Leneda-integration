@@ -1068,6 +1068,7 @@ export class LenedaApp {
           const types: MeterConfig["types"] = [];
           if ((credsForm.querySelector(`[name="meter_${i}_consumption"]`) as HTMLInputElement)?.checked) types.push("consumption");
           if ((credsForm.querySelector(`[name="meter_${i}_production"]`) as HTMLInputElement)?.checked) types.push("production");
+          if ((credsForm.querySelector(`[name="meter_${i}_export"]`) as HTMLInputElement)?.checked) types.push("export");
           if ((credsForm.querySelector(`[name="meter_${i}_gas"]`) as HTMLInputElement)?.checked) types.push("gas");
           meters.push({ id: id.trim(), types });
         }

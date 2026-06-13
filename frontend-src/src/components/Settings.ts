@@ -111,7 +111,8 @@ const FIELD_GROUPS: FieldGroup[] = [
     title: "Discounts",
     icon: "💸",
     fields: [
-      { key: "connect_discount", label: "Monthly Discount", step: "0.01", unit: "EUR/mo", type: "number" },
+      { key: "domiciliation_discount", label: "Domiciliation Discount", step: "0.01", unit: "EUR/mo", type: "number" },
+      { key: "connect_discount", label: "Electronic Invoice Discount", step: "0.01", unit: "EUR/mo", type: "number" },
     ],
   },
   {
@@ -128,6 +129,7 @@ const FIELD_GROUPS: FieldGroup[] = [
 const TYPE_LABELS: Record<string, string> = {
   consumption: "Power Consumption",
   production: "Power Production",
+  export: "Grid Export / Sold to Grid",
   gas: "Gas Consumption",
 };
 
@@ -186,6 +188,10 @@ function renderMeterRow(index: number, meter: MeterConfig, readonly: boolean): s
           <label class="meter-type-cb">
             <input type="checkbox" name="meter_${index}_production" ${meter.types.includes("production") ? "checked" : ""} />
             <span>☀️ Power Production</span>
+          </label>
+          <label class="meter-type-cb">
+            <input type="checkbox" name="meter_${index}_export" ${meter.types.includes("export") ? "checked" : ""} />
+            <span>Grid Export / Sold to Grid</span>
           </label>
           <label class="meter-type-cb">
             <input type="checkbox" name="meter_${index}_gas" ${meter.types.includes("gas") ? "checked" : ""} />
@@ -632,7 +638,7 @@ export function renderSettings(
       content = referenceWindowsSection;
     } else if (g.title === "Discounts") {
       content = `<p class="muted" style="margin: 0 0 var(--sp-3) 0; font-size: 0.85rem;">
-        Positive values are treated as a monthly credit. The dashboard prorates it to the selected period and subtracts it before VAT.
+        Positive values are treated as monthly credits. The dashboard prorates them to the selected period and subtracts them before VAT.
       </p>` + renderFields(g.fields);
     } else if (g.title === "Meter Fees") {
       content = `<p class="muted" style="margin: 0 0 var(--sp-3) 0; font-size: 0.85rem;">

@@ -35,6 +35,7 @@ const NUMERIC_BILLING_KEYS: Array<keyof BillingConfig> = [
   "gas_vat_rate",
   "compensation_fund_rate",
   "electricity_tax_rate",
+  "domiciliation_discount",
   "connect_discount",
   "vat_rate",
 ];
@@ -322,6 +323,7 @@ const DEFAULT_BILLING: BillingConfig = {
   gas_vat_rate: 0.08,
   compensation_fund_rate: 0.0010,
   electricity_tax_rate: 0.001,
+  domiciliation_discount: 1,
   connect_discount: 0,
   vat_rate: 0.08,
   currency: "EUR",

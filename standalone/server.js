@@ -75,6 +75,7 @@ const DEFAULT_BILLING = {
   gas_vat_rate: 0.08,
   compensation_fund_rate: -0.001,
   electricity_tax_rate: 0.001,
+  domiciliation_discount: 1.0,
   connect_discount: 0.5,
   vat_rate: 0.08,
   currency: "EUR",
@@ -191,9 +192,23 @@ function metersOfType(creds, meterType) {
     .filter(Boolean);
 }
 
+function safeGridImport(consumption, solarToHome, reportedGridImport) {
+  const consumptionKwh = Math.max(0, Number(consumption) || 0);
+  const solarToHomeKwh = Math.max(0, Number(solarToHome) || 0);
+  if (reportedGridImport === undefined || reportedGridImport === null) {
+    return Math.max(0, consumptionKwh - solarToHomeKwh);
+  }
+  const gridImport = Math.max(0, Number(reportedGridImport) || 0);
+  if (gridImport <= 1e-9 && consumptionKwh > 1e-9 && solarToHomeKwh <= 1e-9) {
+    return consumptionKwh;
+  }
+  return gridImport;
+}
+
 function meterForObis(obisCode, creds) {
   const consumptionMeters = billingConsumptionMeters(creds);
   const productionMeters = metersOfType(creds, "production");
+  const exportMeters = metersOfType(creds, "export");
   const gasMeters = metersOfType(creds, "gas");
 
   if (obisCode && obisCode.startsWith("7-") && gasMeters[0]) {
@@ -201,12 +216,19 @@ function meterForObis(obisCode, creds) {
   }
   if (
     obisCode &&
-    (/^1-1:2\./.test(obisCode) || /^1-1:4\./.test(obisCode) || /^1-65:2\./.test(obisCode)) &&
+    /^1-65:2\./.test(obisCode) &&
+    (exportMeters[0] || productionMeters[0])
+  ) {
+    return exportMeters[0] || productionMeters[0];
+  }
+  if (
+    obisCode &&
+    (/^1-1:2\./.test(obisCode) || /^1-1:4\./.test(obisCode)) &&
     productionMeters[0]
   ) {
     return productionMeters[0];
   }
-  return consumptionMeters[0] || productionMeters[0] || gasMeters[0] || "";
+  return consumptionMeters[0] || productionMeters[0] || exportMeters[0] || gasMeters[0] || "";
 }
 
 function billingConsumptionMeters(creds) {
@@ -216,7 +238,11 @@ function billingConsumptionMeters(creds) {
 
 function metersForObis(obisCode, creds) {
   if (obisCode.startsWith("7-")) return metersOfType(creds, "gas");
-  if (/^1-1:2\./.test(obisCode) || /^1-1:4\./.test(obisCode) || /^1-65:2\./.test(obisCode)) {
+  if (/^1-65:2\./.test(obisCode)) {
+    const exportMeters = metersOfType(creds, "export");
+    return exportMeters.length ? exportMeters : metersOfType(creds, "production");
+  }
+  if (/^1-1:2\./.test(obisCode) || /^1-1:4\./.test(obisCode)) {
     return metersOfType(creds, "production");
   }
   // For supplier-style invoice totals, use the primary billing consumption meter.
@@ -455,12 +481,14 @@ async function fetchLiveAggregatedData(billingConfig, creds, startDate, endDate)
     : "Infinite";
   const consumptionMeters = billingConsumptionMeters(creds);
   const productionMeters = metersOfType(creds, "production");
+  const exportMeters = metersOfType(creds, "export");
+  const exportSourceMeters = exportMeters.length ? exportMeters : productionMeters;
   const gasMeters = metersOfType(creds, "gas");
 
   const consumption = await fetchAggregatedSum(consumptionMeters, "1-1:1.29.0", startDate, endDate, aggregationLevel, creds);
   const production = await fetchAggregatedSum(productionMeters, "1-1:2.29.0", startDate, endDate, aggregationLevel, creds);
   const gridImport = await fetchAggregatedSum(consumptionMeters, "1-65:1.29.9", startDate, endDate, aggregationLevel, creds);
-  const marketExport = await fetchAggregatedSum(productionMeters, "1-65:2.29.9", startDate, endDate, aggregationLevel, creds);
+  const marketExport = await fetchAggregatedSum(exportSourceMeters, "1-65:2.29.9", startDate, endDate, aggregationLevel, creds);
   const gasEnergy = await fetchAggregatedSum(gasMeters, "7-20:99.33.17", startDate, endDate, aggregationLevel, creds);
   const gasVolume = await fetchAggregatedSum(gasMeters, "7-1:99.23.15", startDate, endDate, aggregationLevel, creds);
 
@@ -468,12 +496,12 @@ async function fetchLiveAggregatedData(billingConfig, creds, startDate, endDate)
   let shared = 0;
   for (const layer of ["1", "2", "3", "4"]) {
     sharedWithMe += await fetchAggregatedSum(consumptionMeters, `1-65:1.29.${layer}`, startDate, endDate, aggregationLevel, creds);
-    shared += await fetchAggregatedSum(productionMeters, `1-65:2.29.${layer}`, startDate, endDate, aggregationLevel, creds);
+    shared += await fetchAggregatedSum(exportSourceMeters, `1-65:2.29.${layer}`, startDate, endDate, aggregationLevel, creds);
   }
 
   const directSolarToHome = Math.max(0, production - shared - marketExport);
   const solarToHome = Math.max(0, directSolarToHome + sharedWithMe);
-  const billedGridImport = Math.max(0, gridImport);
+  const billedGridImport = safeGridImport(consumption, solarToHome, gridImport);
   const { startIso, endIso } = toDayBoundsIso(startDate, endDate);
   const peak = await computePeakAndExceedance(billingConfig, creds, startIso, endIso);
 
