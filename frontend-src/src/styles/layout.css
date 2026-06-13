@@ -1093,7 +1093,7 @@ a:hover {
 
 .meter-type-cb {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-2);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -1105,6 +1105,26 @@ a:hover {
   height: 16px;
   accent-color: var(--clr-primary);
   cursor: pointer;
+  margin-top: 2px;
+}
+
+.meter-type-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.meter-type-copy strong {
+  color: var(--clr-text);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.meter-type-copy small {
+  color: var(--clr-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
 }
 
 .btn-icon {

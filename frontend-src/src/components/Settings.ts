@@ -3,7 +3,7 @@
  *
  * In standalone mode: shows API credential fields (key, energy ID)
  *   plus up to 3 metering points — each with type checkboxes
- *   (Power Consumption / Power Production / Gas Consumption).
+ *   (Consumption / Solar production / Grid export / Gas).
  * In HA mode: shows the meter config read-only from Home Assistant and
  *   a note that credentials are managed via HA Integrations page.
  * Billing configuration is always visible in both modes.
@@ -17,6 +17,7 @@ import type {
   ConsumptionRateWindow,
   ReferencePowerWindow,
   DayGroup,
+  MeterType,
 } from "../api/leneda";
 import { resolveSolarSystemName } from "../utils/solarAllocation";
 
@@ -126,23 +127,49 @@ const FIELD_GROUPS: FieldGroup[] = [
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-const TYPE_LABELS: Record<string, string> = {
-  consumption: "Power Consumption",
-  production: "Power Production",
-  export: "Grid Export / Sold to Grid",
-  gas: "Gas Consumption",
+const METER_ROLE_ORDER: MeterType[] = ["consumption", "production", "export", "gas"];
+
+const TYPE_LABELS: Record<MeterType, string> = {
+  consumption: "Consumption",
+  production: "Solar production",
+  export: "Grid export",
+  gas: "Gas",
 };
 
-const TYPE_ICONS: Record<string, string> = {
+const TYPE_ICONS: Record<MeterType, string> = {
   consumption: "⚡",
   production: "☀️",
+  export: "",
   gas: "🔥",
 };
 
-function renderMeterTypes(types: string[]): string {
+const TYPE_DESCRIPTIONS: Record<MeterType, string> = {
+  consumption: "House/grid import meter",
+  production: "PV generation, including energy that may be self-consumed",
+  export: "Export-only meter for energy sold/sent to the grid",
+  gas: "Gas consumption meter",
+};
+
+function renderMeterTypes(types: MeterType[]): string {
   return types
-    .map((t) => `<span class="meter-type-badge meter-type-${t}">${TYPE_ICONS[t] ?? ""} ${TYPE_LABELS[t] ?? t}</span>`)
+    .map((t) => {
+      const icon = TYPE_ICONS[t];
+      const label = TYPE_LABELS[t] ?? t;
+      return `<span class="meter-type-badge meter-type-${t}">${icon ? `${icon} ` : ""}${label}</span>`;
+    })
     .join(" ");
+}
+
+function renderMeterTypeOption(index: number, type: MeterType, meter: MeterConfig): string {
+  return `
+          <label class="meter-type-cb">
+            <input type="checkbox" name="meter_${index}_${type}" ${meter.types.includes(type) ? "checked" : ""} />
+            <span class="meter-type-copy">
+              <strong>${TYPE_LABELS[type] ?? type}</strong>
+              <small>${TYPE_DESCRIPTIONS[type] ?? ""}</small>
+            </span>
+          </label>
+  `;
 }
 
 function renderMeterRow(index: number, meter: MeterConfig, readonly: boolean): string {
@@ -181,22 +208,7 @@ function renderMeterRow(index: number, meter: MeterConfig, readonly: boolean): s
       <div class="form-row">
         <label>This meter measures</label>
         <div class="meter-type-checkboxes">
-          <label class="meter-type-cb">
-            <input type="checkbox" name="meter_${index}_consumption" ${meter.types.includes("consumption") ? "checked" : ""} />
-            <span>⚡ Power Consumption</span>
-          </label>
-          <label class="meter-type-cb">
-            <input type="checkbox" name="meter_${index}_production" ${meter.types.includes("production") ? "checked" : ""} />
-            <span>☀️ Power Production</span>
-          </label>
-          <label class="meter-type-cb">
-            <input type="checkbox" name="meter_${index}_export" ${meter.types.includes("export") ? "checked" : ""} />
-            <span>Grid Export / Sold to Grid</span>
-          </label>
-          <label class="meter-type-cb">
-            <input type="checkbox" name="meter_${index}_gas" ${meter.types.includes("gas") ? "checked" : ""} />
-            <span>🔥 Gas Consumption</span>
-          </label>
+          ${METER_ROLE_ORDER.map((type) => renderMeterTypeOption(index, type, meter)).join("")}
         </div>
       </div>
     </div>
@@ -378,7 +390,7 @@ export function renderSettings(
           <div class="form-section">
             <div class="form-section-title">📊  Metering Points</div>
             <p class="muted" style="margin: 0 0 var(--sp-3) 0; font-size: 0.85rem;">
-              For each meter, select what it measures. A single bidirectional meter can handle both consumption and production.
+              Select what each meter reports. Use Solar production for PV generation, and Grid export only when the meter reports energy sold or sent to the grid.
             </p>
             <div id="meters-container">
               ${meterCards}
@@ -454,7 +466,7 @@ export function renderSettings(
   }
 
   const feedInSection = productionMeters.length === 0
-    ? `<p class="muted">No production meters configured — add a meter with Power Production type above.</p>`
+    ? `<p class="muted">No solar production meters configured — add a meter with Solar production above.</p>`
     : productionMeters.map((m, idx) => {
       const r = rateFor(m.id);
       const shortId = m.id ? "…" + m.id.slice(-8) : `Meter ${idx + 1}`;
@@ -569,7 +581,7 @@ export function renderSettings(
     : allMeters.map((m, idx) => {
       const f = feeFor(m.id);
       const shortId = m.id ? "…" + m.id.slice(-8) : `Meter ${idx + 1}`;
-      const typeIcons = m.types.map((t: string) => TYPE_ICONS[t] ?? "").join(" ");
+      const typeIcons = m.types.map((t: MeterType) => TYPE_ICONS[t] ?? "").join(" ");
       return `
           <div class="meter-fee-card" style="margin-bottom: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--clr-border); border-radius: var(--radius);">
             <div style="display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2);">

@@ -155,6 +155,24 @@ npm run dev -- --host localhost --port 5175 --strictPort --open
 5. Optionally configure a reference-power source during integration setup.
 6. Open the Leneda dashboard panel and complete billing settings in the `Settings` tab.
 
+### Metering Point Roles
+
+Each configured Leneda metering point can have one or more roles. Choose the role based on what that metering point reports:
+
+| Role | Use it for | Notes |
+|---|---|---|
+| `Consumption` | House/grid import meter. | This is the meter used for home usage and supplier-billed import. |
+| `Solar production` | PV generation, including energy that may be self-consumed. | Use this only for meters that report energy produced by the PV system. |
+| `Grid export` | Export-only meter for energy sold or sent to the grid. | Use this when the meter reports energy sent out to the grid, not additional PV generation. |
+| `Gas` | Gas consumption meter. | Only needed when gas data is available. |
+
+Common setups:
+
+- One bidirectional electricity meter with production/export data: mark it as `Consumption` and `Solar production`.
+- Separate house and PV meters: mark the house meter as `Consumption`, and each raw PV meter as `Solar production`.
+- Separate PV production and sold/export meter: mark the raw PV meter as `Solar production`, and the export-only meter as `Grid export`.
+- Do not mark an export-only/sold-to-grid meter as `Solar production`, because that makes exported energy look like extra solar generation.
+
 ## Standalone Setup
 
 In standalone mode, the `Settings` tab is used for:
