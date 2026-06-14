@@ -222,9 +222,11 @@ function meterForObis(obis: string): string {
   const meters = activeCreds?.meters ?? [];
   const consumption = meters.find((m) => m.types.includes("consumption"));
   const production = meters.find((m) => m.types.includes("production"));
+  const exportMeter = meters.find((m) => m.types.includes("export"));
   const gas = meters.find((m) => m.types.includes("gas"));
   if (obis.startsWith("7-") && gas) return gas.id;
-  if ((/^1-1:2\./.test(obis) || /^1-1:4\./.test(obis) || /^1-65:2\./.test(obis)) && production) return production.id;
+  if (/^1-65:2\./.test(obis) && (exportMeter || production)) return (exportMeter || production)!.id;
+  if ((/^1-1:2\./.test(obis) || /^1-1:4\./.test(obis)) && production) return production.id;
   return consumption?.id ?? meters[0]?.id ?? "";
 }
 
@@ -238,6 +240,13 @@ function allProductionMeters(): string[] {
   const meters = activeCreds?.meters ?? [];
   const ids = meters.filter((m) => m.types.includes("production")).map((m) => m.id);
   return ids.length ? ids : [meterForObis("1-1:2.29.0")];
+}
+
+/** Return all export-only meter IDs, falling back to production for legacy configs. */
+function allExportMeters(): string[] {
+  const meters = activeCreds?.meters ?? [];
+  const ids = meters.filter((m) => m.types.includes("export")).map((m) => m.id);
+  return ids.length ? ids : allProductionMeters();
 }
 
 function sumAggregatedSeries(data: any): number {
@@ -416,9 +425,9 @@ async function handleLiveData(path: string, parsed: URL, _req: any, res: any): P
     const start = parsed.searchParams.get("start") ?? defStart.toISOString();
     const end = parsed.searchParams.get("end") ?? defEnd.toISOString();
 
-    // Production OBIS codes: query ALL production meters and merge
-    const isProdObis = /^1-1:2\./.test(obis) || /^1-1:4\./.test(obis) || /^1-65:2\./.test(obis);
-    const metersToQuery = isProdObis ? allProductionMeters() : [meterForObis(obis)];
+    const isExportObis = /^1-65:2\./.test(obis);
+    const isProdObis = /^1-1:2\./.test(obis) || /^1-1:4\./.test(obis);
+    const metersToQuery = isExportObis ? allExportMeters() : isProdObis ? allProductionMeters() : [meterForObis(obis)];
 
     const fetches = metersToQuery.map((m) =>
       lenedaFetch(
