@@ -134,17 +134,16 @@ export function renderDashboard(state: AppState): string {
   const periodStartValue = toDateInputValue(d?.start);
   const periodEndValue = toDateInputValue(d?.end);
 
-  // Keep preset-range flow math aligned with the older dashboard behavior the user expects.
   const sharedWithMe = d?.shared_with_me ?? 0;
   const shared = d?.shared ?? 0;
   const soldToMarket = Math.max(0, exported);
-  const derivedSolarCoverage = d?.grid_import != null ? consumption - d.grid_import : undefined;
+  const derivedSolarCoverage = d?.grid_import != null ? Math.max(0, consumption - d.grid_import) : undefined;
   const solarToHome = Math.max(
     0,
-    derivedSolarCoverage ??
-      d?.solar_to_home ??
+    d?.solar_to_home ??
       d?.direct_solar_to_home ??
       (reportedSelfConsumed > 0 ? reportedSelfConsumed : production - soldToMarket),
+    derivedSolarCoverage ?? 0,
   );
   const directSolarToHome = Math.max(
     0,
@@ -730,7 +729,7 @@ export function renderDashboard(state: AppState): string {
 
   return `
     <div class="dashboard" style="position: relative;">
-      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.11.0</div>
+      <div style="position:fixed;bottom:4px;right:4px;font-size:10px;opacity:0.5;pointer-events:none;z-index:9999;">v:2.12.0</div>
 
       <!-- Range Selector -->
       <div class="range-selector">

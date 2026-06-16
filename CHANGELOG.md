@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.12.0] - 2026-06-16
+
+### Bug Fixes
+- **Dashboard Solar Self-Use:** Prioritized the calculated `solar_to_home` / `self_consumed` value in the dashboard so setups with separate production and grid-export meters show used solar/battery energy as `production - export`.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.12.0`.
+
+
 ## [v2.11.0] - 2026-06-13
 
 ### Bug Fixes
