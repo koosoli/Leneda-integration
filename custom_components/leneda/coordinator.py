@@ -78,6 +78,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
         # Collect ALL meters of each type (for multi-production-meter summing)
         self.production_meters: list[str] = []
         self.export_meters: list[str] = []
+        self.solar_consumption_meters: list[str] = []
 
         for mid, types in meters:
             if "consumption" in types:
@@ -85,6 +86,10 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
             if "production" in types:
                 self.production_meter = mid
                 self.production_meters.append(mid)
+            if "solar_consumption" in types:
+                self.production_meter = mid
+                self.production_meters.append(mid)
+                self.solar_consumption_meters.append(mid)
             if "export" in types:
                 self.export_meter = mid
                 self.export_meters.append(mid)
@@ -127,6 +132,15 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
             obis_code.startswith("1-1:4.")):
             return self.production_meter
         return self.consumption_meter
+
+    def _get_obis_for_meter(self, meter_id: str, obis_code: str) -> str:
+        """Translate production OBIS codes to consumption OBIS codes if the meter is solar_consumption."""
+        if meter_id in self.solar_consumption_meters:
+            if obis_code == "1-1:2.29.0":
+                return "1-1:1.29.0"
+            if obis_code == "1-1:4.29.0":
+                return "1-1:3.29.0"
+        return obis_code
 
     def _calculate_power_overage(self, items: list[dict], ref_power_kw: float, production_items: list[dict] | None = None) -> float:
         """Calculate total kWh consumed over a reference power.
@@ -204,8 +218,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
             payloads[self.production_meter] = primary_result
         elif self.production_meter:
             try:
+                obis = self._get_obis_for_meter(self.production_meter, "1-1:2.29.0")
                 payloads[self.production_meter] = await self.api_client.async_get_metering_data(
-                    self.production_meter, "1-1:2.29.0", start_dt, end_dt
+                    self.production_meter, obis, start_dt, end_dt
                 )
             except Exception as err:
                 _LOGGER.error("Error fetching production data for %s to %s: %s", start_dt, end_dt, err)
@@ -213,7 +228,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
         if len(self.production_meters) > 1:
             extra_results = await asyncio.gather(*[
                 self.api_client.async_get_metering_data(
-                    meter_id, "1-1:2.29.0", start_dt, end_dt
+                    meter_id, self._get_obis_for_meter(meter_id, "1-1:2.29.0"), start_dt, end_dt
                 )
                 for meter_id in self.production_meters[1:]
             ], return_exceptions=True)
@@ -293,7 +308,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                 non_gas_obis_codes = {k: v for k, v in OBIS_CODES.items() if not k.startswith("7-")}
                 obis_tasks = [
                     self.api_client.async_get_metering_data(
-                        self._meter_for_obis(obis_code), obis_code, yesterday_start_dt, yesterday_end_dt
+                        self._meter_for_obis(obis_code),
+                        self._get_obis_for_meter(self._meter_for_obis(obis_code), obis_code),
+                        yesterday_start_dt, yesterday_end_dt
                     ) for obis_code in non_gas_obis_codes
                 ]
 
@@ -319,11 +336,15 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         ),
                         # Current month production (so far) — for solar offset
                         self.api_client.async_get_metering_data(
-                            self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE, month_start_dt, effective_month_end
+                            self._meter_for_obis(PRODUCTION_CODE),
+                            self._get_obis_for_meter(self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE),
+                            month_start_dt, effective_month_end
                         ),
                         # Previous month production — for solar offset
                         self.api_client.async_get_metering_data(
-                            self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE, start_of_last_month, end_of_last_month
+                            self._meter_for_obis(PRODUCTION_CODE),
+                            self._get_obis_for_meter(self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE),
+                            start_of_last_month, end_of_last_month
                         ),
                     ]
 
@@ -335,7 +356,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, yesterday_start_dt, yesterday_end_dt
                     ),
                     self.api_client.async_get_aggregated_metering_data(
-                        self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE, yesterday_start_dt, yesterday_end_dt
+                        self._meter_for_obis(PRODUCTION_CODE),
+                        self._get_obis_for_meter(self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE),
+                        yesterday_start_dt, yesterday_end_dt
                     ),
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, yesterday_start_dt, yesterday_end_dt
@@ -348,7 +371,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, week_start_dt, effective_week_end
                     ),
                     self.api_client.async_get_aggregated_metering_data(
-                        self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE, week_start_dt, effective_week_end
+                        self._meter_for_obis(PRODUCTION_CODE),
+                        self._get_obis_for_meter(self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE),
+                        week_start_dt, effective_week_end
                     ),
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, week_start_dt, effective_week_end
@@ -361,7 +386,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, last_week_start_dt, last_week_end_dt
                     ),
                     self.api_client.async_get_aggregated_metering_data(
-                        self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE, last_week_start_dt, last_week_end_dt
+                        self._meter_for_obis(PRODUCTION_CODE),
+                        self._get_obis_for_meter(self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE),
+                        last_week_start_dt, last_week_end_dt
                     ),
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, last_week_start_dt, last_week_end_dt
@@ -374,7 +401,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, month_start_dt, effective_month_end
                     ),
                     self.api_client.async_get_aggregated_metering_data(
-                        self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE, month_start_dt, effective_month_end
+                        self._meter_for_obis(PRODUCTION_CODE),
+                        self._get_obis_for_meter(self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE),
+                        month_start_dt, effective_month_end
                     ),
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, month_start_dt, effective_month_end
@@ -387,7 +416,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                         self._meter_for_obis(CONSUMPTION_CODE), CONSUMPTION_CODE, start_of_last_month, end_of_last_month
                     ),
                     self.api_client.async_get_aggregated_metering_data(
-                        self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE, start_of_last_month, end_of_last_month
+                        self._meter_for_obis(PRODUCTION_CODE),
+                        self._get_obis_for_meter(self._meter_for_obis(PRODUCTION_CODE), PRODUCTION_CODE),
+                        start_of_last_month, end_of_last_month
                     ),
                     self.api_client.async_get_aggregated_metering_data(
                         self._meter_for_obis(EXPORT_CODE), EXPORT_CODE, start_of_last_month, end_of_last_month
@@ -409,7 +440,9 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     for meter_id in self.production_meters[1:]:
                         for start, end, prod_key, export_key in period_ranges:
                             extra_prod_tasks.append(self.api_client.async_get_aggregated_metering_data(
-                                meter_id, PRODUCTION_CODE, start, end
+                                meter_id,
+                                self._get_obis_for_meter(meter_id, PRODUCTION_CODE),
+                                start, end
                             ))
                             extra_prod_map.append(prod_key)
                 if len(self.export_meters) > 1:

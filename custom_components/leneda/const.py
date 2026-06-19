@@ -69,6 +69,7 @@ SENSOR_PACK_DEFAULTS = {
 # Meter type constants
 METER_TYPE_CONSUMPTION = "consumption"
 METER_TYPE_PRODUCTION = "production"
+METER_TYPE_SOLAR_CONSUMPTION = "solar_consumption"
 METER_TYPE_EXPORT = "export"
 METER_TYPE_GAS = "gas"
 

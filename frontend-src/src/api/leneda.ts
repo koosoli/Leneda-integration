@@ -94,7 +94,7 @@ export interface SensorsResponse {
   metering_point: string;
 }
 
-export type MeterType = "consumption" | "production" | "export" | "gas";
+export type MeterType = "consumption" | "production" | "solar_consumption" | "export" | "gas";
 
 export interface MeterConfig {
   id: string;

@@ -97,7 +97,7 @@ export function resolveSolarSystemName(
 }
 
 export function resolveProductionFeedInRates(config: BillingConfig): ResolvedFeedInRate[] {
-  const productionMeters = (config.meters ?? []).filter((meter) => meter.types.includes("production"));
+  const productionMeters = (config.meters ?? []).filter((meter) => meter.types.includes("production") || meter.types.includes("solar_consumption"));
   const feedInRates: FeedInRate[] = config.feed_in_rates ?? [];
   const currency = config.currency ?? "EUR";
 

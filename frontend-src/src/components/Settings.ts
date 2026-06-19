@@ -127,11 +127,12 @@ const FIELD_GROUPS: FieldGroup[] = [
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-const METER_ROLE_ORDER: MeterType[] = ["consumption", "production", "export", "gas"];
+const METER_ROLE_ORDER: MeterType[] = ["consumption", "production", "solar_consumption", "export", "gas"];
 
 const TYPE_LABELS: Record<MeterType, string> = {
   consumption: "Consumption",
   production: "Solar production",
+  solar_consumption: "Solar production (consumption-metered)",
   export: "Grid export",
   gas: "Gas",
 };
@@ -139,6 +140,7 @@ const TYPE_LABELS: Record<MeterType, string> = {
 const TYPE_ICONS: Record<MeterType, string> = {
   consumption: "⚡",
   production: "☀️",
+  solar_consumption: "☀️",
   export: "",
   gas: "🔥",
 };
@@ -146,6 +148,7 @@ const TYPE_ICONS: Record<MeterType, string> = {
 const TYPE_DESCRIPTIONS: Record<MeterType, string> = {
   consumption: "House/grid import meter",
   production: "PV generation, including energy that may be self-consumed",
+  solar_consumption: "Solar production measured as consumption",
   export: "Export-only meter for energy sold/sent to the grid",
   gas: "Gas consumption meter",
 };
@@ -450,7 +453,7 @@ export function renderSettings(
     }).join("");
 
   // ── Feed-in mode section (per-production-meter rendering) ──
-  const productionMeters = (config?.meters ?? []).filter((m) => m.types.includes("production"));
+  const productionMeters = (config?.meters ?? []).filter((m) => m.types.includes("production") || m.types.includes("solar_consumption"));
   const feedInRates: FeedInRate[] = config?.feed_in_rates ?? [];
   const isHA = mode === "ha";
 

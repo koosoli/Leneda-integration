@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.13.0] - 2026-06-19
+
+### Features
+- **Solar Consumption Meter Role:** Added support for solar production meters wired in a consumption perspective (using active consumption OBIS codes `1-1:1.29.0` / `1-1:3.29.0` instead of production codes `1-1:2.29.0` / `1-1:4.29.0`). Added a new `solar_consumption` meter type in the configuration flow and settings, with dynamic OBIS code translation in the coordinator and API.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, frontend lockfile, and dashboard version badge to `v2.13.0`.
+
+
 ## [v2.12.0] - 2026-06-16
 
 ### Bug Fixes

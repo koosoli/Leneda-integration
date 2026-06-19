@@ -214,13 +214,14 @@ def _get_meter_routes(hass: HomeAssistant) -> dict[str, list[dict[str, Any]]]:
             if not meter_id:
                 continue
             for meter_type in (types or []):
-                if meter_type not in routes:
+                mapped_type = "production" if meter_type == "solar_consumption" else meter_type
+                if mapped_type not in routes:
                     continue
-                key = (meter_type, meter_id)
+                key = (mapped_type, meter_id)
                 if key in seen:
                     continue
                 seen.add(key)
-                routes[meter_type].append(
+                routes[mapped_type].append(
                     {
                         "meter_id": meter_id,
                         "api_client": coordinator.api_client,
@@ -481,7 +482,9 @@ async def _fetch_peak_and_exceedance(coordinator, start_dt: datetime, end_dt: da
 
             prod_results = await _aio.gather(*[
                 route["api_client"].async_get_metering_data(
-                    route["meter_id"], "1-1:2.29.0", start_dt, end_dt
+                    route["meter_id"],
+                    "1-1:1.29.0" if route["meter_id"] in getattr(route["coordinator"], "solar_consumption_meters", []) else "1-1:2.29.0",
+                    start_dt, end_dt
                 )
                 for route in production_routes
             ], return_exceptions=True)
@@ -638,9 +641,19 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
     async def _fetch_sum(routes: list[dict[str, Any]], obis: str) -> float:
         if not routes:
             return 0.0
+
+        def get_obis_for_route(route, obis_code):
+            coord = route.get("coordinator")
+            if coord and route["meter_id"] in getattr(coord, "solar_consumption_meters", []):
+                if obis_code == "1-1:2.29.0":
+                    return "1-1:1.29.0"
+                if obis_code == "1-1:4.29.0":
+                    return "1-1:3.29.0"
+            return obis_code
+
         results = await _aio.gather(*[
             route["api_client"].async_get_aggregated_metering_data(
-                route["meter_id"], obis, start_dt, end_dt, agg_level
+                route["meter_id"], get_obis_for_route(route, obis), start_dt, end_dt, agg_level
             )
             for route in routes
         ], return_exceptions=True)
@@ -742,8 +755,17 @@ class LenedaTimeseriesView(HomeAssistantView):
             return self.json({"error": "Invalid date range"}, status_code=400)
 
         try:
+            def get_obis_for_route(route, obis_code):
+                coord = route.get("coordinator")
+                if coord and route["meter_id"] in getattr(coord, "solar_consumption_meters", []):
+                    if obis_code == "1-1:2.29.0":
+                        return "1-1:1.29.0"
+                    if obis_code == "1-1:4.29.0":
+                        return "1-1:3.29.0"
+                return obis_code
+
             all_results = await _aio.gather(*[
-                route["api_client"].async_get_metering_data(route["meter_id"], obis, start_dt, end_dt)
+                route["api_client"].async_get_metering_data(route["meter_id"], get_obis_for_route(route, obis), start_dt, end_dt)
                 for route in routes
             ], return_exceptions=True)
 
@@ -806,8 +828,17 @@ class LenedaPerMeterTimeseriesView(HomeAssistantView):
             end_dt = start_dt.replace(hour=23, minute=59, second=59)
 
         try:
+            def get_obis_for_route(route, obis_code):
+                coord = route.get("coordinator")
+                if coord and route["meter_id"] in getattr(coord, "solar_consumption_meters", []):
+                    if obis_code == "1-1:2.29.0":
+                        return "1-1:1.29.0"
+                    if obis_code == "1-1:4.29.0":
+                        return "1-1:3.29.0"
+                return obis_code
+
             all_results = await _aio.gather(*[
-                route["api_client"].async_get_metering_data(route["meter_id"], obis, start_dt, end_dt)
+                route["api_client"].async_get_metering_data(route["meter_id"], get_obis_for_route(route, obis), start_dt, end_dt)
                 for route in routes
             ], return_exceptions=True)
 
