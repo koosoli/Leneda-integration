@@ -127,13 +127,14 @@ const FIELD_GROUPS: FieldGroup[] = [
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-const METER_ROLE_ORDER: MeterType[] = ["consumption", "production", "solar_consumption", "export", "gas"];
+const METER_ROLE_ORDER: MeterType[] = ["consumption", "production", "solar_consumption", "export", "export_consumption", "gas"];
 
 const TYPE_LABELS: Record<MeterType, string> = {
   consumption: "Consumption",
   production: "Solar production",
   solar_consumption: "Solar production (consumption-metered)",
   export: "Grid export",
+  export_consumption: "Grid export (consumption-metered)",
   gas: "Gas",
 };
 
@@ -142,6 +143,7 @@ const TYPE_ICONS: Record<MeterType, string> = {
   production: "☀️",
   solar_consumption: "☀️",
   export: "",
+  export_consumption: "",
   gas: "🔥",
 };
 
@@ -150,6 +152,7 @@ const TYPE_DESCRIPTIONS: Record<MeterType, string> = {
   production: "PV generation, including energy that may be self-consumed",
   solar_consumption: "Solar production measured as consumption",
   export: "Export-only meter for energy sold/sent to the grid",
+  export_consumption: "Grid export measured on the consumption register (active consumption OBIS)",
   gas: "Gas consumption meter",
 };
 

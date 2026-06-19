@@ -3,6 +3,19 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.14.0] - 2026-06-19
+
+### Features
+- **Export Consumption Meter Role:** Added `export_consumption` ("Grid export, consumption-metered") meter type for grid-export meters that report export data on the active-consumption register (`1-1:1.29.0`) instead of the standard export register (`1-65:2.29.9`). This enables correct self-consumption calculation when the export meter only exposes consumption-side OBIS codes.
+
+### Bug Fixes
+- **Sharing-Layer OBIS Safety:** Removed overly broad sharing-layer OBIS translations (`1-65:2.29.1`–`1-65:2.29.4`) from `export_consumption` to prevent potential 4× overcounting if energy community sharing is ever combined with a consumption-metered export meter.
+
+### Improvements
+- **Standalone Server Parity:** Added `productionMeterIds()`, `exportMeterIds()`, and `getObisForMeterId()` helpers to `server.js` so the standalone proxy fully supports `solar_consumption` and `export_consumption` OBIS translation on all API calls.
+- **Version Sync:** Bumped the integration, frontend package, and dashboard version badge to `v2.14.0`.
+
+
 ## [v2.13.0] - 2026-06-19
 
 ### Features

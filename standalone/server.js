@@ -192,6 +192,44 @@ function metersOfType(creds, meterType) {
     .filter(Boolean);
 }
 
+/** Return all meter IDs that act as production (includes solar_consumption). */
+function productionMeterIds(creds) {
+  return [
+    ...metersOfType(creds, "production"),
+    ...metersOfType(creds, "solar_consumption"),
+  ];
+}
+
+/** Return all meter IDs that act as export (includes export_consumption). */
+function exportMeterIds(creds) {
+  return [
+    ...metersOfType(creds, "export"),
+    ...metersOfType(creds, "export_consumption"),
+  ];
+}
+
+/**
+ * Translate an OBIS code for a specific meter ID, handling consumption-metered
+ * solar production and grid-export meters.
+ */
+function getObisForMeterId(meterId, obisCode, creds) {
+  const meters = normalizeMeters(creds.meters);
+  const meter = meters.find((m) => String(m.id || "").trim() === meterId);
+  if (!meter) return obisCode;
+  const types = Array.isArray(meter.types) ? meter.types : [];
+
+  if (types.includes("solar_consumption")) {
+    if (obisCode === "1-1:2.29.0") return "1-1:1.29.0";
+    if (obisCode === "1-1:4.29.0") return "1-1:3.29.0";
+  }
+  if (types.includes("export_consumption")) {
+    if (obisCode === "1-65:2.29.9" || obisCode === "1-1:2.29.0") {
+      return "1-1:1.29.0";
+    }
+  }
+  return obisCode;
+}
+
 function safeGridImport(consumption, solarToHome, reportedGridImport) {
   const consumptionKwh = Math.max(0, Number(consumption) || 0);
   const solarToHomeKwh = Math.max(0, Number(solarToHome) || 0);
@@ -207,8 +245,8 @@ function safeGridImport(consumption, solarToHome, reportedGridImport) {
 
 function meterForObis(obisCode, creds) {
   const consumptionMeters = billingConsumptionMeters(creds);
-  const productionMeters = metersOfType(creds, "production");
-  const exportMeters = metersOfType(creds, "export");
+  const allProductionMeters = productionMeterIds(creds);
+  const allExportMeters = exportMeterIds(creds);
   const gasMeters = metersOfType(creds, "gas");
 
   if (obisCode && obisCode.startsWith("7-") && gasMeters[0]) {
@@ -217,18 +255,18 @@ function meterForObis(obisCode, creds) {
   if (
     obisCode &&
     /^1-65:2\./.test(obisCode) &&
-    (exportMeters[0] || productionMeters[0])
+    (allExportMeters[0] || allProductionMeters[0])
   ) {
-    return exportMeters[0] || productionMeters[0];
+    return allExportMeters[0] || allProductionMeters[0];
   }
   if (
     obisCode &&
     (/^1-1:2\./.test(obisCode) || /^1-1:4\./.test(obisCode)) &&
-    productionMeters[0]
+    allProductionMeters[0]
   ) {
-    return productionMeters[0];
+    return allProductionMeters[0];
   }
-  return consumptionMeters[0] || productionMeters[0] || exportMeters[0] || gasMeters[0] || "";
+  return consumptionMeters[0] || allProductionMeters[0] || allExportMeters[0] || gasMeters[0] || "";
 }
 
 function billingConsumptionMeters(creds) {
@@ -239,11 +277,11 @@ function billingConsumptionMeters(creds) {
 function metersForObis(obisCode, creds) {
   if (obisCode.startsWith("7-")) return metersOfType(creds, "gas");
   if (/^1-65:2\./.test(obisCode)) {
-    const exportMeters = metersOfType(creds, "export");
-    return exportMeters.length ? exportMeters : metersOfType(creds, "production");
+    const allExport = exportMeterIds(creds);
+    return allExport.length ? allExport : productionMeterIds(creds);
   }
   if (/^1-1:2\./.test(obisCode) || /^1-1:4\./.test(obisCode)) {
-    return metersOfType(creds, "production");
+    return productionMeterIds(creds);
   }
   // For supplier-style invoice totals, use the primary billing consumption meter.
   // Auxiliary PV-side consumption meters can add small amounts that do not belong
@@ -341,7 +379,7 @@ async function fetchAggregatedSum(meterIds, obisCode, startDate, endDate, aggreg
   const results = await Promise.all(
     meterIds.map((meterId) =>
       lenedaFetch(
-        `/api/metering-points/${meterId}/time-series/aggregated?obisCode=${encodeURIComponent(obisCode)}&startDate=${startDate}&endDate=${endDate}&aggregationLevel=${aggregationLevel}&transformationMode=Accumulation`,
+        `/api/metering-points/${meterId}/time-series/aggregated?obisCode=${encodeURIComponent(getObisForMeterId(meterId, obisCode, creds))}&startDate=${startDate}&endDate=${endDate}&aggregationLevel=${aggregationLevel}&transformationMode=Accumulation`,
         creds,
       )
     )
@@ -358,7 +396,7 @@ async function fetchMergedTimeseries(meterIds, obisCode, startIso, endIso, creds
   const results = await Promise.all(
     meterIds.map((meterId) =>
       lenedaFetch(
-        `/api/metering-points/${meterId}/time-series?obisCode=${encodeURIComponent(obisCode)}&startDateTime=${encodeURIComponent(startIso)}&endDateTime=${encodeURIComponent(endIso)}`,
+        `/api/metering-points/${meterId}/time-series?obisCode=${encodeURIComponent(getObisForMeterId(meterId, obisCode, creds))}&startDateTime=${encodeURIComponent(startIso)}&endDateTime=${encodeURIComponent(endIso)}`,
         creds,
       )
     )
@@ -438,15 +476,15 @@ function getReferencePowerForDate(billingConfig, date) {
 
 async function computePeakAndExceedance(billingConfig, creds, startIso, endIso) {
   const consumptionMeters = billingConsumptionMeters(creds);
-  const productionMeters = metersOfType(creds, "production");
+  const allProductionMeters = productionMeterIds(creds);
 
   if (!consumptionMeters.length) {
     return { peak_power_kw: 0, exceedance_kwh: 0 };
   }
 
   const consumption = await fetchMergedTimeseries(consumptionMeters, "1-1:1.29.0", startIso, endIso, creds);
-  const production = productionMeters.length
-    ? await fetchMergedTimeseries(productionMeters, "1-1:2.29.0", startIso, endIso, creds)
+  const production = allProductionMeters.length
+    ? await fetchMergedTimeseries(allProductionMeters, "1-1:2.29.0", startIso, endIso, creds)
     : { items: [] };
 
   const productionByTimestamp = new Map(
@@ -480,13 +518,13 @@ async function fetchLiveAggregatedData(billingConfig, creds, startDate, endDate)
     ? "Month"
     : "Infinite";
   const consumptionMeters = billingConsumptionMeters(creds);
-  const productionMeters = metersOfType(creds, "production");
-  const exportMeters = metersOfType(creds, "export");
-  const exportSourceMeters = exportMeters.length ? exportMeters : productionMeters;
+  const allProductionMeters = productionMeterIds(creds);
+  const allExportMeters = exportMeterIds(creds);
+  const exportSourceMeters = allExportMeters.length ? allExportMeters : allProductionMeters;
   const gasMeters = metersOfType(creds, "gas");
 
   const consumption = await fetchAggregatedSum(consumptionMeters, "1-1:1.29.0", startDate, endDate, aggregationLevel, creds);
-  const production = await fetchAggregatedSum(productionMeters, "1-1:2.29.0", startDate, endDate, aggregationLevel, creds);
+  const production = await fetchAggregatedSum(allProductionMeters, "1-1:2.29.0", startDate, endDate, aggregationLevel, creds);
   const gridImport = await fetchAggregatedSum(consumptionMeters, "1-65:1.29.9", startDate, endDate, aggregationLevel, creds);
   const marketExport = await fetchAggregatedSum(exportSourceMeters, "1-65:2.29.9", startDate, endDate, aggregationLevel, creds);
   const gasEnergy = await fetchAggregatedSum(gasMeters, "7-20:99.33.17", startDate, endDate, aggregationLevel, creds);
@@ -718,7 +756,7 @@ async function handleApi(req, res, urlPath, searchParams) {
       const meterResults = await Promise.all(
         meterIds.map(async (meterId) => {
           const data = await lenedaFetch(
-            `/api/metering-points/${meterId}/time-series?obisCode=${encodeURIComponent(obis)}&startDateTime=${encodeURIComponent(startIso)}&endDateTime=${encodeURIComponent(endIso)}`,
+            `/api/metering-points/${meterId}/time-series?obisCode=${encodeURIComponent(getObisForMeterId(meterId, obis, creds))}&startDateTime=${encodeURIComponent(startIso)}&endDateTime=${encodeURIComponent(endIso)}`,
             creds,
           );
           return {

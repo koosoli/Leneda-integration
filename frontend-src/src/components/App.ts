@@ -1070,6 +1070,7 @@ export class LenedaApp {
           if ((credsForm.querySelector(`[name="meter_${i}_production"]`) as HTMLInputElement)?.checked) types.push("production");
           if ((credsForm.querySelector(`[name="meter_${i}_solar_consumption"]`) as HTMLInputElement)?.checked) types.push("solar_consumption");
           if ((credsForm.querySelector(`[name="meter_${i}_export"]`) as HTMLInputElement)?.checked) types.push("export");
+          if ((credsForm.querySelector(`[name="meter_${i}_export_consumption"]`) as HTMLInputElement)?.checked) types.push("export_consumption");
           if ((credsForm.querySelector(`[name="meter_${i}_gas"]`) as HTMLInputElement)?.checked) types.push("gas");
           meters.push({ id: id.trim(), types });
         }

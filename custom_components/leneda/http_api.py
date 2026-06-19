@@ -214,7 +214,9 @@ def _get_meter_routes(hass: HomeAssistant) -> dict[str, list[dict[str, Any]]]:
             if not meter_id:
                 continue
             for meter_type in (types or []):
-                mapped_type = "production" if meter_type == "solar_consumption" else meter_type
+                mapped_type = "production" if meter_type == "solar_consumption" else (
+                    "export" if meter_type == "export_consumption" else meter_type
+                )
                 if mapped_type not in routes:
                     continue
                 key = (mapped_type, meter_id)
@@ -649,6 +651,9 @@ async def _fetch_live_aggregated_data(hass: HomeAssistant, start_dt, end_dt):
                     return "1-1:1.29.0"
                 if obis_code == "1-1:4.29.0":
                     return "1-1:3.29.0"
+            if coord and route["meter_id"] in getattr(coord, "export_consumption_meters", []):
+                if obis_code in ("1-65:2.29.9", "1-1:2.29.0"):
+                    return "1-1:1.29.0"
             return obis_code
 
         results = await _aio.gather(*[
@@ -762,6 +767,9 @@ class LenedaTimeseriesView(HomeAssistantView):
                         return "1-1:1.29.0"
                     if obis_code == "1-1:4.29.0":
                         return "1-1:3.29.0"
+                if coord and route["meter_id"] in getattr(coord, "export_consumption_meters", []):
+                    if obis_code in ("1-65:2.29.9", "1-1:2.29.0"):
+                        return "1-1:1.29.0"
                 return obis_code
 
             all_results = await _aio.gather(*[
@@ -835,6 +843,9 @@ class LenedaPerMeterTimeseriesView(HomeAssistantView):
                         return "1-1:1.29.0"
                     if obis_code == "1-1:4.29.0":
                         return "1-1:3.29.0"
+                if coord and route["meter_id"] in getattr(coord, "export_consumption_meters", []):
+                    if obis_code in ("1-65:2.29.9", "1-1:2.29.0"):
+                        return "1-1:1.29.0"
                 return obis_code
 
             all_results = await _aio.gather(*[

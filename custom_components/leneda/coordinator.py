@@ -79,6 +79,7 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
         self.production_meters: list[str] = []
         self.export_meters: list[str] = []
         self.solar_consumption_meters: list[str] = []
+        self.export_consumption_meters: list[str] = []
 
         for mid, types in meters:
             if "consumption" in types:
@@ -93,6 +94,10 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
             if "export" in types:
                 self.export_meter = mid
                 self.export_meters.append(mid)
+            if "export_consumption" in types:
+                self.export_meter = mid
+                self.export_meters.append(mid)
+                self.export_consumption_meters.append(mid)
             if "gas" in types:
                 self.gas_meter = mid
 
@@ -134,12 +139,21 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
         return self.consumption_meter
 
     def _get_obis_for_meter(self, meter_id: str, obis_code: str) -> str:
-        """Translate production OBIS codes to consumption OBIS codes if the meter is solar_consumption."""
+        """Translate OBIS codes for consumption-metered solar/export meters.
+
+        solar_consumption: PV inverter wired such that production reads on the
+          active-consumption register (1-1:1.29.0) instead of 1-1:2.29.0.
+        export_consumption: Grid-export meter wired such that export reads on
+          the active-consumption register (1-1:1.29.0) instead of 1-65:2.29.9.
+        """
         if meter_id in self.solar_consumption_meters:
             if obis_code == "1-1:2.29.0":
                 return "1-1:1.29.0"
             if obis_code == "1-1:4.29.0":
                 return "1-1:3.29.0"
+        if meter_id in self.export_consumption_meters:
+            if obis_code in ("1-65:2.29.9", "1-1:2.29.0"):
+                return "1-1:1.29.0"
         return obis_code
 
     def _calculate_power_overage(self, items: list[dict], ref_power_kw: float, production_items: list[dict] | None = None) -> float:
