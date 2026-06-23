@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.15.0] - 2026-06-23
+
+### Bug Fixes
+- **Multi-System Export Route Fix:** Corrected `_get_meter_routes` in `http_api.py` so all configured production and export meters are included in custom/year range queries instead of only the first one. Previously, when no dedicated export meter was explicitly registered in the route map, the fallback only appended `preferred.export_meter` (the first meter) rather than iterating `preferred.export_meters`, causing Solar 2's grid export to be silently omitted. This resulted in an inflated self-consumption figure, an underreported feed-in revenue, and an incorrect Net Electricity Position for multi-solar setups over long periods.
+
+### Improvements
+- **Version Sync:** Bumped the integration, frontend package, and dashboard version badge to `v2.15.0`.
+
+
 ## [v2.14.0] - 2026-06-19
 
 ### Features

@@ -241,22 +241,44 @@ def _get_meter_routes(hass: HomeAssistant) -> dict[str, list[dict[str, Any]]]:
                     "coordinator": preferred,
                 }
             )
-        if not routes["production"] and getattr(preferred, "production_meter", ""):
-            routes["production"].append(
-                {
-                    "meter_id": preferred.production_meter,
-                    "api_client": preferred.api_client,
-                    "coordinator": preferred,
-                }
-            )
-        if not routes["export"] and getattr(preferred, "export_meter", ""):
-            routes["export"].append(
-                {
-                    "meter_id": preferred.export_meter,
-                    "api_client": preferred.api_client,
-                    "coordinator": preferred,
-                }
-            )
+        if not routes["production"]:
+            production_meters = getattr(preferred, "production_meters", [])
+            if production_meters:
+                for pm in production_meters:
+                    routes["production"].append(
+                        {
+                            "meter_id": pm,
+                            "api_client": preferred.api_client,
+                            "coordinator": preferred,
+                        }
+                    )
+            elif getattr(preferred, "production_meter", ""):
+                routes["production"].append(
+                    {
+                        "meter_id": preferred.production_meter,
+                        "api_client": preferred.api_client,
+                        "coordinator": preferred,
+                    }
+                )
+        if not routes["export"]:
+            export_meters = getattr(preferred, "export_meters", [])
+            if export_meters:
+                for em in export_meters:
+                    routes["export"].append(
+                        {
+                            "meter_id": em,
+                            "api_client": preferred.api_client,
+                            "coordinator": preferred,
+                        }
+                    )
+            elif getattr(preferred, "export_meter", ""):
+                routes["export"].append(
+                    {
+                        "meter_id": preferred.export_meter,
+                        "api_client": preferred.api_client,
+                        "coordinator": preferred,
+                    }
+                )
         if not routes["gas"] and getattr(preferred, "has_gas", False) and getattr(preferred, "gas_meter", ""):
             routes["gas"].append(
                 {
