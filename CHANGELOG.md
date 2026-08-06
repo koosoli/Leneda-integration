@@ -3,6 +3,12 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.16.3] - 2026-08-06
+
+### Bug Fixes
+- **Existing Installation Startup Failure:** Reverted the Leneda Home Assistant Store major-version bump from 1 to 2. Home Assistant requires a Store migration callback for that major change; without one, existing `.storage/leneda.storage` files caused setup to abort before the Leneda sidebar panel could register. Billing adjustments still migrate safely through `BillingConfig.from_dict()`.
+
+
 ## [v2.16.2] - 2026-08-06
 
 ### Bug Fixes
