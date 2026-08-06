@@ -46,6 +46,7 @@ Leneda is a Home Assistant integration and dashboard for Leneda smart meters in 
 ### Sensors and Home Assistant Integration
 
 - Home Assistant sensor entities for Leneda data.
+- Financial sensors for invoice estimates, feed-in revenue, solar value, and electricity/gas subsidies (yesterday, current month, last month), with per-adjustment detail in the sensor attributes.
 - Consolidated Leneda device presentation in Home Assistant.
 - Home Assistant panel for the custom dashboard.
 - Home Assistant entity selection for sensor-based pricing inputs where applicable.
@@ -59,6 +60,28 @@ Leneda is a Home Assistant integration and dashboard for Leneda smart meters in 
 - Exceedance charge calculation from 15-minute load intervals.
 - Reference power level comparison to estimate which configured Creos level is financially optimal for the selected period.
 - Print-friendly invoice layout for paper or PDF export.
+- Dated billing adjustments for government subsidies, rebates, supplier credits, and temporary taxes (see below).
+
+### Government Aid and Billing Adjustments
+
+The integration supports **dated, per-unit billing adjustments** that are applied as separate invoice lines — your configured tariff prices are never modified. Adjustments are valid between an inclusive start and end date (Europe/Luxembourg), and overlapping adjustments stack.
+
+Two official **Luxembourg Resilienzpak 2026** presets are built in:
+
+| Preset | Amount (incl. VAT) | Valid (inclusive) | Applies to |
+| --- | --- | --- | --- |
+| Luxembourg electricity subsidy 2026 | €0.04 per kWh | 1 Aug 2026 – 31 Dec 2026 | Grid-imported electricity only |
+| Luxembourg gas subsidy 2026 | €0.15 per m³ | 1 Aug 2026 – 31 Dec 2026 | Residential gas volume |
+
+Important details:
+
+- The official rates **include VAT**. The engine converts them to net amounts (`gross / (1 + VAT rate)`) before the invoice VAT is recalculated, so the final invoice reduction equals exactly `eligible quantity × official rate` — e.g. 100 eligible kWh = €4.00 and 100 m³ = €15.00.
+- The electricity subsidy only applies to **energy imported from the grid**, never to total household consumption, solar production, or exported energy. It applies equally across all time-of-use windows. Legal eligibility (e.g. the 25,000 kWh/year residential cap) cannot be determined with certainty from interval data — treat the displayed amounts as an estimate of the aid for your measured consumption.
+- **Solar self-consumption correction:** during the subsidy period, each self-consumed solar kWh avoids a grid import that would itself have been subsidised. The solar savings value is therefore reduced by the applicable subsidy for eligible timestamps only; savings outside the period are unchanged.
+- **Avoid double-counting:** if the electricity price you entered in Settings already reflects the subsidy, tick *"My entered tariff already includes this adjustment"* — the adjustment is then shown for information only and not deducted again.
+- Invoice lines show the eligible quantity, rate, total, and whether a value is **exact or estimated**. Values are marked estimated when a period must be split without 15-minute interval data (day-based proration), or when gas volume is derived from gas energy (≈11 kWh/m³) because no m³ reading exists.
+- You can disable or edit the presets, add custom adjustments (any dates, amount, commodity), delete custom entries, and restore the official presets from **Settings → Government Aid & Billing Adjustments**.
+- Existing installations receive the presets **disabled** (visible in Settings for review) to avoid silently changing invoices; new configurations have them enabled.
 
 ### Solar and Self-Consumption Value Tracking
 
@@ -78,6 +101,7 @@ Leneda is a Home Assistant integration and dashboard for Leneda smart meters in 
 - Per-meter monthly fees.
 - Gas billing configuration.
 - Currency, taxes, levies, and contract discount fields.
+- Government aid and billing adjustments with official Luxembourg presets and custom dated adjustments.
 - Standalone credential entry and connection testing.
 
 ## Product Views

@@ -19,6 +19,8 @@ import type {
   DayGroup,
   MeterType,
 } from "../api/leneda";
+import type { BillingAdjustment } from "../utils/billingAdjustments";
+import { LU_ELECTRICITY_PRESET_ID, normalizeAdjustments } from "../utils/billingAdjustments";
 import { resolveSolarSystemName } from "../utils/solarAllocation";
 
 interface Field {
@@ -115,6 +117,11 @@ const FIELD_GROUPS: FieldGroup[] = [
       { key: "domiciliation_discount", label: "Domiciliation Discount", step: "0.01", unit: "EUR/mo", type: "number" },
       { key: "connect_discount", label: "Electronic Invoice Discount", step: "0.01", unit: "EUR/mo", type: "number" },
     ],
+  },
+  {
+    title: "Government Aid & Billing Adjustments",
+    icon: "🏛️",
+    fields: [],
   },
   {
     title: "General",
@@ -267,8 +274,7 @@ function renderConsumptionRateWindowRow(index: number, window: ConsumptionRateWi
   `;
 }
 
-function renderReferencePowerWindowRow(index: number, window: ReferencePowerWindow): string {
-  return `
+function renderReferencePowerWindowRow(index: number, window: ReferencePowerWindow): string {  return `
     <div class="meter-card">
       <div class="meter-header">
         <strong>Reference Window ${index + 1}</strong>
@@ -301,6 +307,91 @@ function renderReferencePowerWindowRow(index: number, window: ReferencePowerWind
         <div class="input-group">
           <input id="reference-window-${index}-power" name="reference_window_${index}_reference_power_kw" type="number" step="0.1" value="${window.reference_power_kw ?? 5}" />
           <span class="input-unit">kW</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdjustmentRow(index: number, adj: BillingAdjustment): string {
+  const isPreset = !!adj.preset_id;
+  const isLuElectricity = adj.preset_id === LU_ELECTRICITY_PRESET_ID;
+  const showDoubleCountWarning = isLuElectricity && adj.enabled && !adj.tariff_already_includes_adjustment;
+  return `
+    <div class="meter-card">
+      <div class="meter-header">
+        <strong>${adj.label || `Adjustment ${index + 1}`}</strong>
+        ${isPreset ? '<span class="meter-type-badge meter-type-production">Official preset</span>' : ""}
+        <button type="button" class="btn-icon remove-adjustment-btn" data-adjustment="${index}" title="Remove adjustment">&times;</button>
+      </div>
+      <input type="hidden" name="adjustment_${index}_id" value="${adj.id}" />
+      <input type="hidden" name="adjustment_${index}_preset_id" value="${adj.preset_id ?? ""}" />
+      ${showDoubleCountWarning ? `
+      <div class="settings-note settings-note-warning">
+        ⚠️ Only enable this if your configured electricity price does <strong>not</strong> already include the government subsidy.
+      </div>
+      ` : ""}
+      <div class="form-row">
+        <label class="meter-type-cb">
+          <input type="checkbox" name="adjustment_${index}_enabled" ${adj.enabled ? "checked" : ""} />
+          <span class="meter-type-copy"><strong>Enabled</strong><small>Apply this adjustment on invoices inside its date range</small></span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label for="adjustment-${index}-label">Label</label>
+        <div class="input-group">
+          <input id="adjustment-${index}-label" name="adjustment_${index}_label" type="text" value="${adj.label ?? ""}" placeholder="e.g. Luxembourg electricity subsidy 2026" />
+        </div>
+      </div>
+      <div class="form-row">
+        <label for="adjustment-${index}-commodity">Commodity</label>
+        <div class="input-group">
+          <select id="adjustment-${index}-commodity" name="adjustment_${index}_commodity">
+            <option value="electricity" ${adj.commodity === "electricity" ? "selected" : ""}>Electricity</option>
+            <option value="gas" ${adj.commodity === "gas" ? "selected" : ""}>Gas</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label for="adjustment-${index}-basis">Calculation basis</label>
+        <div class="input-group">
+          <select id="adjustment-${index}-basis" name="adjustment_${index}_basis">
+            <option value="grid_import_kwh" ${adj.basis === "grid_import_kwh" ? "selected" : ""}>Grid import (kWh)</option>
+            <option value="gas_volume_m3" ${adj.basis === "gas_volume_m3" ? "selected" : ""}>Gas volume (m³)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label for="adjustment-${index}-amount">Amount per unit</label>
+        <div class="input-group">
+          <input id="adjustment-${index}-amount" name="adjustment_${index}_amount_gross" type="number" step="0.0001" min="0" value="${adj.amount_gross ?? 0}" />
+          <span class="input-unit">EUR/${adj.basis === "gas_volume_m3" ? "m³" : "kWh"}</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Valid period (inclusive)</label>
+        <div class="input-group schedule-window-inputs">
+          <input name="adjustment_${index}_start_date" type="date" value="${adj.start_date ?? ""}" />
+          <span class="input-unit">to</span>
+          <input name="adjustment_${index}_end_date" type="date" value="${adj.end_date ?? ""}" />
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="meter-type-cb">
+          <input type="checkbox" name="adjustment_${index}_vat_included" ${adj.vat_included ? "checked" : ""} />
+          <span class="meter-type-copy"><strong>Amount includes VAT</strong><small>Official subsidy rates are published including VAT</small></span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label class="meter-type-cb">
+          <input type="checkbox" name="adjustment_${index}_tariff_already_includes_adjustment" ${adj.tariff_already_includes_adjustment ? "checked" : ""} />
+          <span class="meter-type-copy"><strong>My entered tariff already includes this adjustment</strong><small>Prevents double-counting; the adjustment is shown for information only</small></span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label for="adjustment-${index}-note">Eligibility note</label>
+        <div class="input-group">
+          <input id="adjustment-${index}-note" name="adjustment_${index}_eligibility_note" type="text" value="${adj.eligibility_note ?? ""}" placeholder="e.g. Residential customers below 25,000 kWh/year" />
         </div>
       </div>
     </div>
@@ -641,6 +732,29 @@ export function renderSettings(
     </button>
   `;
 
+  const adjustments: BillingAdjustment[] = normalizeAdjustments(config?.billing_adjustments);
+  const adjustmentsSection = `
+    <p class="muted" style="margin: 0 0 var(--sp-3) 0; font-size: 0.85rem;">
+      Dated per-unit subsidies, rebates, supplier credits or temporary taxes. Amounts are deducted as separate invoice
+      lines &mdash; your tariff prices are never modified. Date ranges are inclusive (Europe/Luxembourg).
+      Overlapping adjustments stack. If your configured tariff already includes an adjustment, tick
+      <strong>My entered tariff already includes this adjustment</strong> to avoid double-counting.
+    </p>
+    <div id="adjustments-container">
+      ${adjustments.length > 0
+        ? adjustments.map((adj, idx) => renderAdjustmentRow(idx, adj)).join("")
+        : '<p class="muted">No billing adjustments configured.</p>'}
+    </div>
+    <div style="display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-3);">
+      <button type="button" id="add-adjustment-btn" class="btn btn-outline">
+        + Add Custom Adjustment
+      </button>
+      <button type="button" id="restore-adjustment-presets-btn" class="btn btn-outline">
+        Restore Official Presets
+      </button>
+    </div>
+  `;
+
   const groups = FIELD_GROUPS.map((g) => {
     // Hide gas billing section when no gas meter is configured
     if (g.title === "Gas Billing" && !hasGasMeter) return "";
@@ -654,6 +768,8 @@ export function renderSettings(
       content = timeOfUseSection;
     } else if (g.title === "Reference Power Windows") {
       content = referenceWindowsSection;
+    } else if (g.title === "Government Aid & Billing Adjustments") {
+      content = adjustmentsSection;
     } else if (g.title === "Discounts") {
       content = `<p class="muted" style="margin: 0 0 var(--sp-3) 0; font-size: 0.85rem;">
         Positive values are treated as monthly credits. The dashboard prorates them to the selected period and subtracts them before VAT.

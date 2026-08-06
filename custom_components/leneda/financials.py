@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from .billing_adjustments import compute_billing_adjustments
 from .const import DOMAIN
 from .models import BillingConfig
 from .storage import get_effective_reference_power
@@ -24,6 +25,12 @@ FINANCIAL_SENSOR_MAP: dict[str, tuple[str, str]] = {
     "f_yesterday_total_solar_value": ("yesterday", "total_solar_value"),
     "f_current_month_total_solar_value": ("current_month", "total_solar_value"),
     "f_last_month_total_solar_value": ("last_month", "total_solar_value"),
+    "f_yesterday_electricity_subsidy": ("yesterday", "electricity_adjustments_gross"),
+    "f_current_month_electricity_subsidy": ("current_month", "electricity_adjustments_gross"),
+    "f_last_month_electricity_subsidy": ("last_month", "electricity_adjustments_gross"),
+    "f_yesterday_gas_subsidy": ("yesterday", "gas_adjustments_gross"),
+    "f_current_month_gas_subsidy": ("current_month", "gas_adjustments_gross"),
+    "f_last_month_gas_subsidy": ("last_month", "gas_adjustments_gross"),
 }
 
 PERIOD_DATA_KEYS: dict[str, dict[str, str]] = {
@@ -90,6 +97,12 @@ class FinancialSummary:
     peak_power_kw: float
     period_days: int
     proration_factor: float
+    invoice_before_adjustments: float
+    electricity_adjustments_gross: float
+    gas_adjustments_gross: float
+    solar_subsidy_correction: float
+    adjustments_estimated: bool
+    adjustment_lines: tuple = ()
 
 
 def get_billing_config(hass) -> BillingConfig:
@@ -505,6 +518,28 @@ def calculate_financial_summary(
         - max(0.0, float(getattr(billing_config, "domiciliation_discount", 0.0) or 0.0)) * pro_factor
         - max(0.0, float(billing_config.connect_discount or 0.0)) * pro_factor
     )
+
+    # Dated billing adjustments (e.g. Luxembourg 2026 subsidies) are subtracted
+    # as net amounts before VAT so the final gross reduction matches the
+    # official per-unit rate exactly.
+    adjustments = compute_billing_adjustments(
+        getattr(billing_config, "billing_adjustments", None),
+        vat_rate=float(billing_config.vat_rate or 0.0),
+        gas_vat_rate=float(billing_config.gas_vat_rate or 0.0),
+        period_start=start_dt.date(),
+        period_end=end_dt.date(),
+        consumption_items=consumption_items or [],
+        production_items=production_items or [],
+        fallback_grid_import_kwh=billed_consumption,
+        fallback_self_consumed_kwh=solar_to_home,
+        gas_volume_m3=gas_volume,
+        gas_energy_kwh=gas_energy,
+    )
+    electricity_adj = adjustments["electricity"]
+    gas_adj = adjustments["gas"]
+
+    subtotal_costs_before_adjustments = subtotal_costs
+    subtotal_costs = subtotal_costs - float(electricity_adj["applied_net"])
     total_costs = subtotal_costs * (1 + float(billing_config.vat_rate or 0.0))
 
     priority_allocation = _allocate_priority_solar(
@@ -532,6 +567,11 @@ def calculate_financial_summary(
         + float(billing_config.compensation_fund_rate or 0.0)
     )
     total_self_consumed_savings = self_consumed_savings_base * (1 + float(billing_config.vat_rate or 0.0))
+    # A self-consumed solar kWh during a subsidy period avoids a grid import
+    # that would itself have received the subsidy, so its economic value is
+    # lower by the applicable gross subsidy per kWh.
+    solar_subsidy_correction = float(electricity_adj["solar_correction_gross"])
+    total_self_consumed_savings = total_self_consumed_savings - solar_subsidy_correction
     self_use_vs_export_value = total_self_consumed_savings - (
         float(priority_allocation["total_self_use_export_equivalent"])
         if priority_allocation is not None
@@ -561,8 +601,19 @@ def calculate_financial_summary(
         + gas_energy * float(billing_config.gas_network_variable_rate or 0.0)
         + gas_energy * float(billing_config.gas_tax_rate or 0.0)
     )
+    gas_subtotal = gas_subtotal - float(gas_adj["applied_net"])
     gas_total = gas_subtotal * (1 + float(billing_config.gas_vat_rate or 0.0)) if has_gas else 0.0
     electricity_total = total_costs - feed_in_revenue
+
+    adjustment_lines = tuple(
+        {
+            **line,
+            "quantity": round(float(line["quantity"]), 4),
+            "total_gross": round(float(line["total_gross"]), 4),
+            "total_net": round(float(line["total_net"]), 4),
+        }
+        for line in (*electricity_adj["lines"], *gas_adj["lines"])
+    )
 
     return FinancialSummary(
         invoice_estimate=round(electricity_total + gas_total, 2),
@@ -580,6 +631,16 @@ def calculate_financial_summary(
         peak_power_kw=round(effective_peak_power, 2),
         period_days=days,
         proration_factor=round(pro_factor, 4),
+        invoice_before_adjustments=round(
+            (subtotal_costs_before_adjustments * (1 + float(billing_config.vat_rate or 0.0)) - feed_in_revenue)
+            + (gas_total + float(gas_adj["applied_gross"])),
+            2,
+        ),
+        electricity_adjustments_gross=round(float(electricity_adj["applied_gross"]), 2),
+        gas_adjustments_gross=round(float(gas_adj["applied_gross"]), 2),
+        solar_subsidy_correction=round(solar_subsidy_correction, 2),
+        adjustments_estimated=bool(adjustments["estimated"]),
+        adjustment_lines=adjustment_lines,
     )
 
 
@@ -629,6 +690,12 @@ def build_financial_sensor_payloads(
             "peak_power_kw": summary.peak_power_kw,
             "period_days": summary.period_days,
             "proration_factor": summary.proration_factor,
+            "invoice_before_adjustments": summary.invoice_before_adjustments,
+            "electricity_adjustments_gross": summary.electricity_adjustments_gross,
+            "gas_adjustments_gross": summary.gas_adjustments_gross,
+            "solar_subsidy_correction": summary.solar_subsidy_correction,
+            "adjustments_estimated": summary.adjustments_estimated,
+            "adjustment_lines": list(summary.adjustment_lines),
         }
 
     return values, attributes

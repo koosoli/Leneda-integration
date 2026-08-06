@@ -24,6 +24,7 @@ import type {
   MeterConfig,
   PerMeterTimeseriesResponse,
 } from "./leneda";
+import { defaultAdjustments } from "../utils/billingAdjustments";
 
 interface StoredCreds {
   api_key: string;
@@ -180,6 +181,7 @@ function defaultBilling(): BillingConfig {
       { id: "LU0000000000000000000000000DEMO01", types: ["consumption", "production"] },
       { id: "LU0000000000000000000000000DEMO02", types: ["gas"] },
     ],
+    billing_adjustments: defaultAdjustments(true),
   } as BillingConfig;
 }
 

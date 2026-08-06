@@ -11,6 +11,7 @@ import type {
   SensorsResponse,
   BillingConfig,
 } from "../src/api/leneda";
+import { defaultAdjustments } from "../src/utils/billingAdjustments";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
@@ -336,6 +337,7 @@ const DEFAULT_BILLING: BillingConfig = {
     { id: "LU0000000000000000000000000MOCK01", types: ["consumption", "production"] },
     { id: "LU0000000000000000000000000MOCK02", types: ["gas"] },
   ],
+  billing_adjustments: defaultAdjustments(true),
 } as BillingConfig;
 
 // ── Credentials (standalone mock) ────────────────────────────────

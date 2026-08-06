@@ -22,6 +22,7 @@ import {
   calculatePrioritySolarAllocation,
   resolveProductionFeedInRates,
 } from "../utils/solarAllocation";
+import { computeBillingAdjustments } from "../utils/billingAdjustments";
 
 const CREOS_REFERENCE_POWER_LEVELS: ReadonlyArray<{
   kw: number;
@@ -71,7 +72,7 @@ function periodProration(
   customEnd?: string,
   rangeStart?: string,
   rangeEnd?: string,
-): { days: number; factor: number; label: string } {
+): { days: number; factor: number; label: string; startIso: string; endIso: string } {
   const now = new Date();
   const parsedStart = parseDateOnly(rangeStart);
   const parsedEnd = parseDateOnly(rangeEnd);
@@ -159,10 +160,15 @@ function periodProration(
     start.getDate() === 1 &&
     end.getDate() === new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate();
 
+  const toIso = (dt: Date) =>
+    `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+
   return {
     days,
     factor,
     label: fullMonth ? "full month" : `${days} day${days === 1 ? "" : "s"}`,
+    startIso: toIso(start),
+    endIso: toIso(end),
   };
 }
 
@@ -356,7 +362,7 @@ export function renderInvoice(state: AppState): string {
 
   // ── Period proration ──
   // Fixed monthly fees are scaled to the viewed period length.
-  const { days: periodDays, factor: proFactor, label: proLabel } = periodProration(
+  const { days: periodDays, factor: proFactor, label: proLabel, startIso: periodStartIso, endIso: periodEndIso } = periodProration(
     state.range, state.customStart, state.customEnd, d.start, d.end,
   );
   const proratedFixedFee = config.energy_fixed_fee * proFactor;
@@ -402,8 +408,35 @@ export function renderInvoice(state: AppState): string {
     domiciliationDiscount -
     connectDiscount;
 
-  const vat = subtotalCosts * config.vat_rate;
-  const totalCosts = subtotalCosts + vat;
+  // ── Government aid & dated billing adjustments ──
+  // Subtracted as net amounts before VAT so the final gross reduction matches
+  // the official per-unit rate exactly (e.g. 0.04 EUR/kWh incl. VAT).
+  const billingAdjustments = computeBillingAdjustments({
+    adjustments: config.billing_adjustments,
+    vatRate: config.vat_rate,
+    gasVatRate: config.gas_vat_rate ?? 0.08,
+    periodStart: periodStartIso,
+    periodEnd: periodEndIso,
+    consumptionItems: state.consumptionTimeseries?.items ?? null,
+    productionItems: state.productionTimeseries?.items ?? null,
+    fallbackGridImportKwh: billedConsumption,
+    fallbackSelfConsumedKwh: totalSolarToHome,
+    gasVolumeM3: gasVolume,
+    gasEnergyKwh: gasEnergy,
+  });
+  const electricityAdjustmentLines = billingAdjustments.electricity.lines;
+  const gasAdjustmentLines = billingAdjustments.gas.lines;
+  const hasElectricityAdjustments = electricityAdjustmentLines.some((line) => line.applied && Math.abs(line.total_gross) > 1e-9);
+  const hasGasAdjustments = gasAdjustmentLines.some((line) => line.applied && Math.abs(line.total_gross) > 1e-9);
+  const electricityAdjustmentsNet = billingAdjustments.electricity.applied_net;
+  const gasAdjustmentsNet = billingAdjustments.gas.applied_net;
+  const adjustmentsEstimated = billingAdjustments.estimated;
+
+  const subtotalBeforeAdjustments = subtotalCosts;
+  const subtotalAfterAdjustments = subtotalCosts - electricityAdjustmentsNet;
+
+  const vat = subtotalAfterAdjustments * config.vat_rate;
+  const totalCosts = subtotalAfterAdjustments + vat;
 
   // 6. Feed-in revenue (per-production-meter rates)
   //    When per-meter 15-minute production is available, self-use/export is
@@ -454,7 +487,11 @@ export function renderInvoice(state: AppState): string {
   const avoidedImportRateWithVat = avoidedImportRate * (1 + config.vat_rate);
   const selfConsumedSavings = selfConsumed * avoidedImportRate;
   const selfConsumedSavingsVat = selfConsumedSavings * config.vat_rate;
-  const totalSelfConsumedSavings = selfConsumedSavings + selfConsumedSavingsVat;
+  // During a subsidy period a self-consumed solar kWh avoids a grid import
+  // that would itself have received the subsidy, so its value is lower by
+  // the applicable gross subsidy per kWh (timestamp-aware in the engine).
+  const solarSubsidyCorrection = billingAdjustments.electricity.solar_correction_gross;
+  const totalSelfConsumedSavings = selfConsumedSavings + selfConsumedSavingsVat - solarSubsidyCorrection;
   const selfConsumptionExportEquivalent = prioritySolarAllocation
     ? prioritySolarAllocation.totalSelfUseExportEquivalent
     : selfConsumed * avgFeedInRate;
@@ -487,8 +524,10 @@ export function renderInvoice(state: AppState): string {
   const gasNetworkVariableCost = gasEnergy * (config.gas_network_variable_rate ?? 0.0120);
   const gasTax = gasEnergy * (config.gas_tax_rate ?? 0.0010);
   const gasSubtotal = gasFixedFee + gasVariableCost + gasNetworkFee + gasNetworkVariableCost + gasTax;
-  const gasVat = gasSubtotal * (config.gas_vat_rate ?? 0.08);
-  const gasTotalCosts = gasSubtotal + gasVat;
+  const gasSubtotalBeforeAdjustments = gasSubtotal;
+  const gasSubtotalAfterAdjustments = gasSubtotal - gasAdjustmentsNet;
+  const gasVat = gasSubtotalAfterAdjustments * (config.gas_vat_rate ?? 0.08);
+  const gasTotalCosts = gasSubtotalAfterAdjustments + gasVat;
 
   const currency = config.currency || "EUR";
   const fmt = (v: number) => `${fmtNum(v, 2)} ${currency}`;
@@ -496,6 +535,35 @@ export function renderInvoice(state: AppState): string {
   const fmtKwh = (v: number) => fmtNum(v, 3);
   const fmtVolume = (v: number) => fmtNum(v, 3);
   const fmtDeltaClass = (v: number) => v >= 0 ? "comparison-delta-savings" : "comparison-delta-extra";
+
+  // ── Adjustment line rendering (shared by electricity and gas tables) ──
+  const renderAdjustmentRows = (lines: typeof electricityAdjustmentLines, vatRate: number) =>
+    lines.map((line) => {
+      const qty = line.unit === "kWh" ? `${fmtKwh(line.quantity)} kWh` : `${fmtVolume(line.quantity)} m³`;
+      const estimatedNote = line.estimated ? ` <span class="muted">(estimated)</span>` : "";
+      const grossTotal = line.vat_included ? line.total_gross : line.total_gross * (1 + vatRate);
+      if (!line.applied) {
+        return `
+            <tr class="revenue-row">
+              <td>${line.label}${estimatedNote}<br/><span class="muted" style="font-size: var(--text-xs);">Already reflected in your configured tariff — not deducted again</span></td>
+              <td style="text-align: right;">${qty} × ${fmtNum(line.amount_gross, 4)} ${currency}/${line.unit}</td>
+              <td style="text-align: right;"><span class="muted">in tariff</span></td>
+            </tr>
+          `;
+      }
+      return `
+            <tr class="revenue-row">
+              <td>${line.label}${estimatedNote}${line.eligibility_note ? `<br/><span class="muted" style="font-size: var(--text-xs);">${line.eligibility_note}</span>` : ""}</td>
+              <td style="text-align: right;">${qty} × ${fmtNum(line.amount_gross, 4)} ${currency}/${line.unit}${line.vat_included ? " incl. VAT" : " excl. VAT"}<br/>= −${fmt(grossTotal)}${line.vat_included ? " incl. VAT" : ""}</td>
+              <td class="revenue-amount" style="text-align: right;">−${fmt(line.total_net)}</td>
+            </tr>
+          `;
+    }).join("");
+  const electricityAdjustmentRows = renderAdjustmentRows(electricityAdjustmentLines, config.vat_rate);
+  const gasAdjustmentRows = renderAdjustmentRows(gasAdjustmentLines, config.gas_vat_rate ?? 0.08);
+  const totalElectricityBeforeAdjustments = subtotalBeforeAdjustments * (1 + config.vat_rate);
+  const hasAnyAdjustmentLines = electricityAdjustmentLines.length > 0;
+  const hasAnyGasAdjustmentLines = gasAdjustmentLines.length > 0;
   const perSystemSolarBreakdownRows = hasPerSystemSolarBreakdown
     ? `
             <tr class="section-label"><td colspan="3">Per-System Self-Use vs Export</td></tr>
@@ -831,9 +899,18 @@ export function renderInvoice(state: AppState): string {
             ` : ""}
             ` : ""}
 
+            ${hasAnyAdjustmentLines ? `
+            <tr class="section-label"><td colspan="3">Government Aid &amp; Billing Adjustments</td></tr>
+            ${electricityAdjustmentRows}
+            <tr class="subtotal-row">
+              <td colspan="2">Subtotal before adjustments (excl. VAT)</td>
+              <td style="text-align: right;"><strong>${fmt(subtotalBeforeAdjustments)}</strong></td>
+            </tr>
+            ` : ""}
+
             <tr class="subtotal-row">
               <td colspan="2">Subtotal (excl. VAT)</td>
-              <td style="text-align: right;"><strong>${fmt(subtotalCosts)}</strong></td>
+              <td style="text-align: right;"><strong>${fmt(subtotalAfterAdjustments)}</strong></td>
             </tr>
             <tr>
               <td>VAT</td>
@@ -844,6 +921,16 @@ export function renderInvoice(state: AppState): string {
               <td colspan="2"><strong>Supplier Bill Estimate</strong></td>
               <td style="text-align: right;"><strong>${fmt(totalCosts)}</strong></td>
             </tr>
+            ${hasElectricityAdjustments ? `
+            <tr class="subtotal-row">
+              <td colspan="2">Total before billing adjustments (incl. VAT)</td>
+              <td style="text-align: right;">${fmt(totalElectricityBeforeAdjustments)}</td>
+            </tr>
+            <tr class="subtotal-row">
+              <td colspan="2">Total after billing adjustments (incl. VAT)</td>
+              <td style="text-align: right;">${fmt(totalCosts)}${adjustmentsEstimated ? ' <span class="muted">(estimated)</span>' : ""}</td>
+            </tr>
+            ` : ""}
 
             ${production > 0 ? `
             <tr class="section-label revenue-section"><td colspan="3">Solar Value & Feed-in Revenue</td></tr>
@@ -917,6 +1004,7 @@ export function renderInvoice(state: AppState): string {
       <div class="card invoice-footer">
         <p class="muted" style="line-height: var(--lh-relaxed);">
           <strong>Supplier bill estimate: ${fmt(totalCosts)}</strong>${feedInRevenue > 0 ? ` Feed-in revenue is shown separately as ${fmt(feedInRevenue)}, giving a net electricity position of ${fmt(netTotal)} after export credit.` : ""}
+          ${hasElectricityAdjustments ? ` Government aid and billing adjustments reduce this estimate by ${fmt(billingAdjustments.electricity.applied_gross)} incl. VAT (total before adjustments: ${fmt(totalElectricityBeforeAdjustments)}).${adjustmentsEstimated ? " Some adjustment values are estimated from incomplete interval data." : ""}` : ""}
           <br/>
           This estimate uses your configured billing rates for the selected period.
           Variable electricity charges are applied to energy bought from the grid (${fmtKwh(billedConsumption)} kWh), not total home usage.
@@ -976,9 +1064,18 @@ export function renderInvoice(state: AppState): string {
               <td style="text-align: right;">${fmt(gasTax)}</td>
             </tr>
 
+            ${hasAnyGasAdjustmentLines ? `
+            <tr class="section-label"><td colspan="3">Government Aid &amp; Billing Adjustments</td></tr>
+            ${gasAdjustmentRows}
+            <tr class="subtotal-row">
+              <td colspan="2">Subtotal before adjustments (excl. VAT)</td>
+              <td style="text-align: right;"><strong>${fmt(gasSubtotalBeforeAdjustments)}</strong></td>
+            </tr>
+            ` : ""}
+
             <tr class="subtotal-row">
               <td colspan="2">Subtotal (excl. VAT)</td>
-              <td style="text-align: right;"><strong>${fmt(gasSubtotal)}</strong></td>
+              <td style="text-align: right;"><strong>${fmt(gasSubtotalAfterAdjustments)}</strong></td>
             </tr>
             <tr>
               <td>VAT</td>
@@ -989,6 +1086,12 @@ export function renderInvoice(state: AppState): string {
               <td colspan="2"><strong>Total Gas Costs</strong></td>
               <td style="text-align: right;"><strong>${fmt(gasTotalCosts)}</strong></td>
             </tr>
+            ${hasGasAdjustments ? `
+            <tr class="subtotal-row">
+              <td colspan="2">Gas total before billing adjustments (incl. VAT)</td>
+              <td style="text-align: right;">${fmt(gasSubtotalBeforeAdjustments * (1 + (config.gas_vat_rate ?? 0.08)))}</td>
+            </tr>
+            ` : ""}
           </tbody>
         </table>
       </div>
@@ -1102,6 +1205,13 @@ export function renderInvoice(state: AppState): string {
               <td style="text-align: right;">${fmtNum(config.vat_rate * 100, 0)}%</td>
               <td style="text-align: right;">${fmt(selfConsumedSavingsVat)}</td>
             </tr>
+            ${solarSubsidyCorrection > 0.0001 ? `
+            <tr>
+              <td>Government aid not received on own solar${billingAdjustments.electricity.estimated ? ' <span class="muted">(estimated)</span>' : ""}</td>
+              <td style="text-align: right;">Self-consumed kWh during the aid period avoid subsidised grid imports</td>
+              <td class="revenue-amount" style="text-align: right;">−${fmt(solarSubsidyCorrection)}</td>
+            </tr>
+            ` : ""}
             <tr class="subtotal-row">
               <td colspan="2"><strong>Self-Consumption Savings</strong></td>
               <td style="text-align: right;"><strong>${fmt(totalSelfConsumedSavings)}</strong></td>

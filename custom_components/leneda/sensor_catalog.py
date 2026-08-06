@@ -118,6 +118,12 @@ FINANCIAL_SENSOR_DEFINITIONS: tuple[SensorDefinition, ...] = (
     SensorDefinition("f_yesterday_total_solar_value", "67 - Total Solar Value (Yesterday)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
     SensorDefinition("f_current_month_total_solar_value", "68 - Total Solar Value (Current Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
     SensorDefinition("f_last_month_total_solar_value", "69 - Total Solar Value (Last Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_yesterday_electricity_subsidy", "70 - Electricity Subsidy (Yesterday)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_current_month_electricity_subsidy", "71 - Electricity Subsidy (Current Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_last_month_electricity_subsidy", "72 - Electricity Subsidy (Last Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_yesterday_gas_subsidy", "73 - Gas Subsidy (Yesterday)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_current_month_gas_subsidy", "74 - Gas Subsidy (Current Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
+    SensorDefinition("f_last_month_gas_subsidy", "75 - Gas Subsidy (Last Month)", "financial", OPT_ENABLE_FINANCIAL_SENSORS),
 )
 
 ALL_SENSOR_DEFINITIONS: tuple[SensorDefinition, ...] = (

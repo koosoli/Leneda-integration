@@ -140,6 +140,9 @@ export interface MeterMonthlyFee {
   fee: number;
 }
 
+export type { BillingAdjustment } from "../utils/billingAdjustments";
+import type { BillingAdjustment } from "../utils/billingAdjustments";
+
 export interface BillingConfig {
   energy_fixed_fee: number;
   energy_variable_rate: number;
@@ -175,6 +178,8 @@ export interface BillingConfig {
   meter_has_gas?: boolean;
   ha_meter_id?: string;
   meters?: MeterConfig[];
+  /** Dated billing adjustments (government subsidies, rebates, temporary taxes). */
+  billing_adjustments?: BillingAdjustment[];
 }
 
 export type TimeRange =

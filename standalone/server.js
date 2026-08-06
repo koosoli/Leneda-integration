@@ -79,6 +79,36 @@ const DEFAULT_BILLING = {
   connect_discount: 0.5,
   vat_rate: 0.08,
   currency: "EUR",
+  billing_adjustments: [
+    {
+      id: "lu-electricity-resilienzpak-2026",
+      label: "Luxembourg electricity subsidy 2026",
+      enabled: true,
+      commodity: "electricity",
+      basis: "grid_import_kwh",
+      amount_gross: 0.04,
+      start_date: "2026-08-01",
+      end_date: "2026-12-31",
+      vat_included: true,
+      preset_id: "lu_resilienzpak_electricity_2026",
+      eligibility_note: "Residential customers below 25,000 kWh/year; applies to grid import only.",
+      tariff_already_includes_adjustment: false,
+    },
+    {
+      id: "lu-gas-resilienzpak-2026",
+      label: "Luxembourg gas subsidy 2026",
+      enabled: true,
+      commodity: "gas",
+      basis: "gas_volume_m3",
+      amount_gross: 0.15,
+      start_date: "2026-08-01",
+      end_date: "2026-12-31",
+      vat_included: true,
+      preset_id: "lu_resilienzpak_gas_2026",
+      eligibility_note: "Eligible residential gas consumption.",
+      tariff_already_includes_adjustment: false,
+    },
+  ],
 };
 
 function normalizeMeters(meters) {

@@ -34,6 +34,7 @@ import {
   isChartTimeBucketEnabled,
   type ChartTimeBucket,
 } from "../utils/chartTime";
+import { defaultAdjustments } from "../utils/billingAdjustments";
 
 // ── localStorage credential helpers (persist across reloads, never in git) ──
 
@@ -1160,8 +1161,7 @@ export class LenedaApp {
       return windows;
     };
 
-    const collectReferenceWindowsFromForm = (fd: FormData) => {
-      const windows = [];
+    const collectReferenceWindowsFromForm = (fd: FormData) => {      const windows = [];
       for (let i = 0; i < 24; i++) {
         const label = fd.get(`reference_window_${i}_label`) as string | null;
         const dayGroup = fd.get(`reference_window_${i}_day_group`) as string | null;
@@ -1180,12 +1180,45 @@ export class LenedaApp {
       return windows;
     };
 
+    const collectAdjustmentsFromForm = (fd: FormData) => {
+      const adjustments = [];
+      for (let i = 0; i < 50; i++) {
+        const id = fd.get(`adjustment_${i}_id`) as string | null;
+        if (id === null) break;
+        const label = fd.get(`adjustment_${i}_label`) as string | null;
+        const commodity = fd.get(`adjustment_${i}_commodity`) as string | null;
+        const basis = fd.get(`adjustment_${i}_basis`) as string | null;
+        const amount = fd.get(`adjustment_${i}_amount_gross`) as string | null;
+        const startDate = fd.get(`adjustment_${i}_start_date`) as string | null;
+        const endDate = fd.get(`adjustment_${i}_end_date`) as string | null;
+        const presetId = fd.get(`adjustment_${i}_preset_id`) as string | null;
+        const note = fd.get(`adjustment_${i}_eligibility_note`) as string | null;
+        adjustments.push({
+          id: (id ?? "").trim() || `custom-${i + 1}`,
+          label: (label ?? "").trim() || `Adjustment ${i + 1}`,
+          enabled: (form.querySelector(`[name="adjustment_${i}_enabled"]`) as HTMLInputElement)?.checked ?? false,
+          commodity: commodity === "gas" ? "gas" : "electricity",
+          basis: basis === "gas_volume_m3" ? "gas_volume_m3" : "grid_import_kwh",
+          amount_gross: parseFloat(amount ?? "0") || 0,
+          start_date: startDate ?? "",
+          end_date: endDate ?? "",
+          vat_included: (form.querySelector(`[name="adjustment_${i}_vat_included"]`) as HTMLInputElement)?.checked ?? false,
+          preset_id: (presetId ?? "").trim(),
+          eligibility_note: (note ?? "").trim(),
+          tariff_already_includes_adjustment:
+            (form.querySelector(`[name="adjustment_${i}_tariff_already_includes_adjustment"]`) as HTMLInputElement)?.checked ?? false,
+        });
+      }
+      return adjustments;
+    };
+
     const buildConfigPayload = (): Record<string, number | string | boolean | unknown[]> => {
       const fd = new FormData(form);
       const data: Record<string, number | string | boolean | unknown[]> = {};
 
       // Collect all checkboxes first (unchecked ones aren't in FormData)
       form.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
+        if (cb.name.startsWith("adjustment_")) return;
         data[cb.name] = cb.checked;
       });
 
@@ -1207,7 +1240,11 @@ export class LenedaApp {
       const feeMap: Record<string, Record<string, string>> = {};
 
       for (const [key, val] of fd.entries()) {
-        if (key.startsWith("consumption_window_") || key.startsWith("reference_window_")) {
+        if (
+          key.startsWith("consumption_window_") ||
+          key.startsWith("reference_window_") ||
+          key.startsWith("adjustment_")
+        ) {
           continue;
         }
         const m = key.match(ratePattern);
@@ -1267,6 +1304,7 @@ export class LenedaApp {
 
       data.consumption_rate_windows = collectConsumptionWindowsFromForm(fd);
       data.reference_power_windows = collectReferenceWindowsFromForm(fd);
+      data.billing_adjustments = collectAdjustmentsFromForm(fd);
 
       return data;
     };
@@ -1334,6 +1372,55 @@ export class LenedaApp {
           windows.splice(idx, 1);
           draft.reference_power_windows = windows;
         });
+      });
+    });
+
+    this.root.querySelector("#add-adjustment-btn")?.addEventListener("click", () => {
+      applyDraftConfigToState((draft) => {
+        const adjustments = Array.isArray(draft.billing_adjustments)
+          ? [...draft.billing_adjustments as Array<Record<string, unknown>>]
+          : [];
+        adjustments.push({
+          id: `custom-${Date.now()}`,
+          label: `Adjustment ${adjustments.length + 1}`,
+          enabled: true,
+          commodity: "electricity",
+          basis: "grid_import_kwh",
+          amount_gross: 0,
+          start_date: "",
+          end_date: "",
+          vat_included: true,
+          preset_id: "",
+          eligibility_note: "",
+          tariff_already_includes_adjustment: false,
+        });
+        draft.billing_adjustments = adjustments;
+      });
+    });
+
+    this.root.querySelectorAll(".remove-adjustment-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = parseInt((btn as HTMLElement).dataset.adjustment ?? "0", 10);
+        applyDraftConfigToState((draft) => {
+          const adjustments = Array.isArray(draft.billing_adjustments)
+            ? [...draft.billing_adjustments as Array<Record<string, unknown>>]
+            : [];
+          adjustments.splice(idx, 1);
+          draft.billing_adjustments = adjustments;
+        });
+      });
+    });
+
+    this.root.querySelector("#restore-adjustment-presets-btn")?.addEventListener("click", () => {
+      applyDraftConfigToState((draft) => {
+        const current = Array.isArray(draft.billing_adjustments)
+          ? [...draft.billing_adjustments as Array<Record<string, unknown>>]
+          : [];
+        const custom = current.filter((adj) => !adj.preset_id);
+        draft.billing_adjustments = [
+          ...defaultAdjustments(true) as unknown as Array<Record<string, unknown>>,
+          ...custom,
+        ];
       });
     });
 

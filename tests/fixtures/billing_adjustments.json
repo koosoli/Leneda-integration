@@ -1,0 +1,831 @@
+{
+  "description": "Shared parity fixtures for the Python and TypeScript billing-adjustment engines. Both implementations must produce identical results (compared at 1e-9).",
+  "cases": [
+    {
+      "name": "july_only_no_subsidy",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-07-01",
+        "period_end": "2026-07-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-07-15T10:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-07-15T10:15:00+02:00" },
+          { "value": 100, "startedAt": "2026-07-15T10:30:00+02:00" },
+          { "value": 100, "startedAt": "2026-07-15T10:45:00+02:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 0,
+          "applied_net": 0,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 0, "total_gross": 0, "total_net": 0, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "august_100kwh_exactly_4_eur",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-08-15T10:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:15:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:30:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:45:00+02:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 4.0,
+          "applied_net": 3.7037037037037037,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 100.0, "total_gross": 4.0, "total_net": 3.7037037037037037, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "july_august_span_only_august_subsidised",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-07-15",
+        "period_end": "2026-08-15",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-07-31T22:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-07-31T23:45:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-01T00:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-01T00:15:00+02:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 2.0,
+          "applied_net": 1.8518518518518519,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 50.0, "total_gross": 2.0, "total_net": 1.8518518518518519, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "dec_jan_span_only_through_dec31_lux_time",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-12-15",
+        "period_end": "2027-01-15",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-12-31T22:30:00+00:00" },
+          { "value": 100, "startedAt": "2026-12-31T23:30:00+00:00" },
+          { "value": 100, "startedAt": "2027-01-01T12:00:00+01:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 1.0,
+          "applied_net": 0.9259259259259259,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 25.0, "total_gross": 1.0, "total_net": 0.9259259259259259, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "time_of_use_windows_all_eligible",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-08-03T00:15:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-03T06:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-03T12:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-03T18:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T00:15:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T06:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-16T12:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-16T23:45:00+02:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 8.0,
+          "applied_net": 7.407407407407407,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 200.0, "total_gross": 8.0, "total_net": 7.407407407407407, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "fractional_kwh_gross_reduction_exact",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [
+          { "value": 493.824, "startedAt": "2026-08-10T09:00:00+02:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 4.93824,
+          "applied_net": 4.572444444444444,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 123.456, "total_gross": 4.93824, "total_net": 4.572444444444444, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "solar_self_consumption_correction_during_subsidy",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-08-15T10:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:15:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:30:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:45:00+02:00" }
+        ],
+        "production_items": [
+          { "value": 40, "startedAt": "2026-08-15T10:00:00+02:00" },
+          { "value": 40, "startedAt": "2026-08-15T10:15:00+02:00" }
+        ],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 3.2,
+          "applied_net": 2.962962962962963,
+          "solar_correction_gross": 0.8,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 80.0, "total_gross": 3.2, "total_net": 2.962962962962963, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "solar_outside_subsidy_period_unchanged",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-07-01",
+        "period_end": "2026-07-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-07-15T10:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-07-15T10:15:00+02:00" }
+        ],
+        "production_items": [
+          { "value": 40, "startedAt": "2026-07-15T10:00:00+02:00" },
+          { "value": 40, "startedAt": "2026-07-15T10:15:00+02:00" }
+        ],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 0,
+          "applied_net": 0,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 0, "total_gross": 0, "total_net": 0, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "gas_100m3_exactly_15_eur",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-gas-resilienzpak-2026",
+            "label": "Luxembourg gas subsidy 2026",
+            "enabled": true,
+            "commodity": "gas",
+            "basis": "gas_volume_m3",
+            "amount_gross": 0.15,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_gas_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 100,
+        "gas_energy_kwh": 1100
+      },
+      "expected": {
+        "electricity": { "applied_gross": 0, "applied_net": 0, "solar_correction_gross": 0, "estimated": false, "lines": [] },
+        "gas": {
+          "applied_gross": 15.0,
+          "applied_net": 13.88888888888889,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-gas-resilienzpak-2026", "quantity": 100.0, "total_gross": 15.0, "total_net": 13.88888888888889, "applied": true, "estimated": false }
+          ]
+        },
+        "estimated": false
+      }
+    },
+    {
+      "name": "gas_span_prorated_estimated",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-gas-resilienzpak-2026",
+            "label": "Luxembourg gas subsidy 2026",
+            "enabled": true,
+            "commodity": "gas",
+            "basis": "gas_volume_m3",
+            "amount_gross": 0.15,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_gas_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-07-15",
+        "period_end": "2026-08-15",
+        "consumption_items": [],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 100,
+        "gas_energy_kwh": 1100
+      },
+      "expected": {
+        "electricity": { "applied_gross": 0, "applied_net": 0, "solar_correction_gross": 0, "estimated": false, "lines": [] },
+        "gas": {
+          "applied_gross": 7.03125,
+          "applied_net": 6.510416666666667,
+          "estimated": true,
+          "lines": [
+            { "id": "lu-gas-resilienzpak-2026", "quantity": 46.875, "total_gross": 7.03125, "total_net": 6.510416666666667, "applied": true, "estimated": true }
+          ]
+        },
+        "estimated": true
+      }
+    },
+    {
+      "name": "gas_volume_derived_from_energy_estimated",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-gas-resilienzpak-2026",
+            "label": "Luxembourg gas subsidy 2026",
+            "enabled": true,
+            "commodity": "gas",
+            "basis": "gas_volume_m3",
+            "amount_gross": 0.15,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_gas_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 1100
+      },
+      "expected": {
+        "electricity": { "applied_gross": 0, "applied_net": 0, "solar_correction_gross": 0, "estimated": false, "lines": [] },
+        "gas": {
+          "applied_gross": 15.0,
+          "applied_net": 13.88888888888889,
+          "estimated": true,
+          "lines": [
+            { "id": "lu-gas-resilienzpak-2026", "quantity": 100.0, "total_gross": 15.0, "total_net": 13.88888888888889, "applied": true, "estimated": true }
+          ]
+        },
+        "estimated": true
+      }
+    },
+    {
+      "name": "tariff_already_includes_no_double_deduction",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026",
+            "tariff_already_includes_adjustment": true
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-08-15T10:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:15:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:30:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:45:00+02:00" }
+        ],
+        "production_items": [
+          { "value": 40, "startedAt": "2026-08-15T10:00:00+02:00" }
+        ],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 0,
+          "applied_net": 0,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 90.0, "total_gross": 3.6, "total_net": 3.3333333333333335, "applied": false, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "disabled_adjustment_no_effect",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": false,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-08-15T10:00:00+02:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": { "applied_gross": 0, "applied_net": 0, "solar_correction_gross": 0, "estimated": false, "lines": [] },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "custom_adjustment_vat_excluded",
+      "input": {
+        "adjustments": [
+          {
+            "id": "custom-supplier-credit",
+            "label": "Supplier loyalty credit",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.02,
+            "start_date": "2026-03-01",
+            "end_date": "2026-03-31",
+            "vat_included": false
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-03-01",
+        "period_end": "2026-03-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-03-10T10:00:00+01:00" },
+          { "value": 100, "startedAt": "2026-03-10T10:15:00+01:00" },
+          { "value": 100, "startedAt": "2026-03-10T10:30:00+01:00" },
+          { "value": 100, "startedAt": "2026-03-10T10:45:00+01:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 2.0,
+          "applied_net": 2.0,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "custom-supplier-credit", "quantity": 100.0, "total_gross": 2.0, "total_net": 2.0, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "overlapping_adjustments_stack",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          },
+          {
+            "id": "custom-regional-rebate",
+            "label": "Regional rebate",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.01,
+            "start_date": "2026-08-01",
+            "end_date": "2026-09-30",
+            "vat_included": true
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-31",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-08-15T10:00:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:15:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:30:00+02:00" },
+          { "value": 100, "startedAt": "2026-08-15T10:45:00+02:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 5.0,
+          "applied_net": 4.62962962962963,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 100.0, "total_gross": 4.0, "total_net": 3.7037037037037037, "applied": true, "estimated": false },
+            { "id": "custom-regional-rebate", "quantity": 100.0, "total_gross": 1.0, "total_net": 0.9259259259259259, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "fallback_without_interval_data_estimated",
+      "input": {
+        "adjustments": [
+          {
+            "id": "lu-electricity-resilienzpak-2026",
+            "label": "Luxembourg electricity subsidy 2026",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
+            "vat_included": true,
+            "preset_id": "lu_resilienzpak_electricity_2026"
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-07-15",
+        "period_end": "2026-08-15",
+        "consumption_items": [],
+        "production_items": [],
+        "fallback_grid_import_kwh": 100,
+        "fallback_self_consumed_kwh": 20,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 1.875,
+          "applied_net": 1.7361111111111112,
+          "solar_correction_gross": 0.375,
+          "estimated": true,
+          "lines": [
+            { "id": "lu-electricity-resilienzpak-2026", "quantity": 46.875, "total_gross": 1.875, "total_net": 1.7361111111111112, "applied": true, "estimated": true }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": true
+      }
+    },
+    {
+      "name": "leap_day_boundary",
+      "input": {
+        "adjustments": [
+          {
+            "id": "custom-leap",
+            "label": "Leap day rebate",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2024-02-28",
+            "end_date": "2024-02-29",
+            "vat_included": true
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2024-02-28",
+        "period_end": "2024-03-01",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2024-02-29T12:00:00+01:00" },
+          { "value": 100, "startedAt": "2024-03-01T12:00:00+01:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 1.0,
+          "applied_net": 0.9259259259259259,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "custom-leap", "quantity": 25.0, "total_gross": 1.0, "total_net": 0.9259259259259259, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    },
+    {
+      "name": "dst_transition_october",
+      "input": {
+        "adjustments": [
+          {
+            "id": "custom-dst",
+            "label": "DST weekend rebate",
+            "enabled": true,
+            "commodity": "electricity",
+            "basis": "grid_import_kwh",
+            "amount_gross": 0.04,
+            "start_date": "2026-10-24",
+            "end_date": "2026-10-26",
+            "vat_included": true
+          }
+        ],
+        "vat_rate": 0.08,
+        "gas_vat_rate": 0.08,
+        "period_start": "2026-10-23",
+        "period_end": "2026-10-27",
+        "consumption_items": [
+          { "value": 100, "startedAt": "2026-10-23T23:30:00+00:00" },
+          { "value": 100, "startedAt": "2026-10-25T00:30:00+00:00" },
+          { "value": 100, "startedAt": "2026-10-25T01:30:00+00:00" },
+          { "value": 100, "startedAt": "2026-10-27T12:00:00+01:00" }
+        ],
+        "production_items": [],
+        "fallback_grid_import_kwh": 0,
+        "fallback_self_consumed_kwh": 0,
+        "gas_volume_m3": 0,
+        "gas_energy_kwh": 0
+      },
+      "expected": {
+        "electricity": {
+          "applied_gross": 3.0,
+          "applied_net": 2.7777777777777777,
+          "solar_correction_gross": 0,
+          "estimated": false,
+          "lines": [
+            { "id": "custom-dst", "quantity": 75.0, "total_gross": 3.0, "total_net": 2.7777777777777777, "applied": true, "estimated": false }
+          ]
+        },
+        "gas": { "applied_gross": 0, "applied_net": 0, "estimated": false, "lines": [] },
+        "estimated": false
+      }
+    }
+  ]
+}

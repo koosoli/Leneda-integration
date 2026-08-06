@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TypedDict
 
+from .billing_adjustments import default_adjustments, normalize_adjustments
+
 @dataclass
 class BillingConfig:
     """Billing configuration.
@@ -51,6 +53,10 @@ class BillingConfig:
     meters: list = field(default_factory=lambda: [
         {"id": "", "types": ["consumption"]}
     ])
+    # Dated billing adjustments (subsidies/rebates). New configurations get the
+    # official Luxembourg presets enabled; existing stored configs receive them
+    # disabled in from_dict so they are never double-counted silently.
+    billing_adjustments: list = field(default_factory=default_adjustments)
 
     def to_dict(self) -> dict:
         """Return as dict."""
@@ -83,6 +89,7 @@ class BillingConfig:
             "api_key": self.api_key,
             "energy_id": self.energy_id,
             "meters": self.meters,
+            "billing_adjustments": self.billing_adjustments,
         }
 
     @classmethod
@@ -120,7 +127,20 @@ class BillingConfig:
             meters=migrated.get("meters", [
                 {"id": "", "types": ["consumption"]}
             ]),
+            billing_adjustments=cls._migrate_billing_adjustments(migrated),
         )
+
+    @classmethod
+    def _migrate_billing_adjustments(cls, data: dict) -> list:
+        """Load billing adjustments with a safe migration for existing installs.
+
+        Stored configs written before adjustments existed get the official
+        Luxembourg presets in a disabled, reviewable state so a subsidy is
+        never silently double-counted against a tariff that already includes it.
+        """
+        if "billing_adjustments" in data:
+            return normalize_adjustments(data.get("billing_adjustments"))
+        return default_adjustments(enabled=False)
 
     @staticmethod
     def _coerce_float(value: object, default: float) -> float:
