@@ -3,7 +3,7 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
-## [Unreleased]
+## [v2.16.0] - 2026-08-06
 
 ### New Features
 - **Government Aid & Billing Adjustments:** Generic dated billing-adjustment system (Settings → Government Aid & Billing Adjustments) with official Luxembourg Resilienzpak 2026 presets: €0.04/kWh incl. VAT on grid-imported electricity and €0.15/m³ incl. VAT on gas, valid 2026-08-01 through 2026-12-31 (inclusive, Europe/Luxembourg). Adjustments are computed from 15-minute intervals as separate invoice lines — tariffs are never modified — converted to net amounts before VAT so the final reduction matches the official gross rate exactly. Supports custom adjustments, enable/disable, "tariff already includes this adjustment" protection against double-counting, and preset restore. Overlapping adjustments stack.
@@ -15,6 +15,7 @@ All notable changes to the **Leneda HACS Integration** will be documented in thi
 - **Storage Migration:** Billing storage bumped to version 2. Existing configurations receive the Luxembourg presets disabled (visible and reviewable in Settings) so subsidies are never silently double-counted; new configurations get them enabled.
 - **Calculation Parity:** The adjustment engine exists as twin Python/TypeScript implementations validated against shared JSON fixtures (pytest + Vitest).
 - **License:** Added GPL-3.0 LICENSE file (fixes HACS validation).
+- **Version Sync:** Bumped the integration, frontend package, and dashboard version badge to `v2.16.0`.
 
 
 ## [v2.15.0] - 2026-06-23
