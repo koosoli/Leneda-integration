@@ -3,6 +3,12 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.16.2] - 2026-08-06
+
+### Bug Fixes
+- **Missing Sidebar Panel During Setup Failure:** The Leneda sidebar panel, dashboard HTTP views, and diagnostics endpoints were registered only after the first Leneda API refresh succeeded. A temporary API failure therefore made the entire Leneda menu disappear. They now register before the first refresh so the dashboard remains available for Settings and diagnostics.
+
+
 ## [v2.16.1] - 2026-08-06
 
 ### Bug Fixes

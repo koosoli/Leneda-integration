@@ -32,6 +32,35 @@ PANEL_SERVE_URL = "/leneda-panel/index.html"
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
+def _register_dashboard(hass: HomeAssistant) -> None:
+    """Register the dashboard views and sidebar panel once.
+
+    The panel must not depend on the first remote data refresh succeeding. It
+    remains useful for diagnostics and settings when the Leneda API is
+    temporarily unavailable.
+    """
+    if hass.data[DOMAIN].get("views_registered"):
+        return
+
+    hass.http.register_view(LenedaPanelView(hass))
+    hass.http.register_view(LenedaStaticView(hass))
+    async_register_api_views(hass)
+
+    from homeassistant.components import frontend
+
+    frontend.async_register_built_in_panel(
+        hass,
+        component_name="iframe",
+        sidebar_title="Leneda",
+        sidebar_icon="mdi:flash",
+        frontend_url_path=SIDEBAR_PATH,
+        config={"url": PANEL_SERVE_URL},
+        require_admin=False,
+    )
+    hass.data[DOMAIN]["views_registered"] = True
+    _LOGGER.info("Leneda: panel and HTTP views registered")
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Leneda from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -52,6 +81,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         storage = LenedaStorage(hass)
         await storage.async_load()
         hass.data[DOMAIN]["storage"] = storage
+
+    # Keep the dashboard available even when the first API refresh fails.
+    _register_dashboard(hass)
 
     # ── Coordinator ──
     coordinator = LenedaDataUpdateCoordinator(
@@ -84,30 +116,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             vol.Required("obis_codes"): vol.All(cv.ensure_list, [cv.string]),
         }),
     )
-
-    # ── Register HTTP views + sidebar panel (once across all entries) ──
-    if not hass.data[DOMAIN].get("views_registered"):
-        # Panel view (serves index.html)
-        hass.http.register_view(LenedaPanelView(hass))
-        # Static asset view (serves JS/CSS bundles)
-        hass.http.register_view(LenedaStaticView(hass))
-        # REST API endpoints for the dashboard
-        async_register_api_views(hass)
-
-        # Sidebar panel — iframe pointing to our panel view
-        from homeassistant.components import frontend
-
-        frontend.async_register_built_in_panel(
-            hass,
-            component_name="iframe",
-            sidebar_title="Leneda",
-            sidebar_icon="mdi:flash",
-            frontend_url_path=SIDEBAR_PATH,
-            config={"url": PANEL_SERVE_URL},
-            require_admin=False,
-        )
-        hass.data[DOMAIN]["views_registered"] = True
-        _LOGGER.info("Leneda: panel and HTTP views registered")
 
     return True
 
