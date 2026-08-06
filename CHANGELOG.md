@@ -3,6 +3,12 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.16.1] - 2026-08-06
+
+### Bug Fixes
+- **Startup Crash on Systems Without tzdata:** `ZoneInfo("Europe/Luxembourg")` was evaluated at import time in the billing-adjustment engine, which prevented the whole integration (and its sidebar panel) from loading on installations lacking IANA timezone data (e.g. some Windows core installs). The timezone now resolves defensively with an equivalent built-in Luxembourg CET/CEST fallback (identical results, covered by tests).
+
+
 ## [v2.16.0] - 2026-08-06
 
 ### New Features

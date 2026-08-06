@@ -19,11 +19,38 @@ Concepts:
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-LUX_TZ = ZoneInfo("Europe/Luxembourg")
+try:
+    _LUX_TZ: ZoneInfo | None = ZoneInfo("Europe/Luxembourg")
+except ZoneInfoNotFoundError:  # systems without tzdata (e.g. Windows core installs)
+    _LUX_TZ = None
+
+
+def _last_sunday(year: int, month: int) -> date:
+    """Return the last Sunday of a month (for EU DST rules)."""
+    if month == 12:
+        candidate = date(year, 12, 31)
+    else:
+        candidate = date(year, month + 1, 1) - timedelta(days=1)
+    return candidate - timedelta(days=(candidate.weekday() + 1) % 7)
+
+
+def _luxembourg_offset_hours(utc_dt: datetime) -> int:
+    """Europe/Luxembourg offset without tzdata: +2 CEST, +1 CET.
+
+    DST runs from the last Sunday of March 01:00 UTC to the last Sunday of
+    October 01:00 UTC.
+    """
+    dst_start = datetime.combine(
+        _last_sunday(utc_dt.year, 3), datetime.min.time(), tzinfo=timezone.utc
+    ) + timedelta(hours=1)
+    dst_end = datetime.combine(
+        _last_sunday(utc_dt.year, 10), datetime.min.time(), tzinfo=timezone.utc
+    ) + timedelta(hours=1)
+    return 2 if dst_start <= utc_dt < dst_end else 1
 
 # Approximate Luxembourg gas conversion used only when no metered m3 exists.
 GAS_KWH_PER_M3 = 11.0
@@ -180,9 +207,15 @@ def luxembourg_date(timestamp: Any) -> str | None:
             return None
     else:
         return None
+    if _LUX_TZ is not None:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_LUX_TZ)
+        return dt.astimezone(_LUX_TZ).date().isoformat()
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=LUX_TZ)
-    return dt.astimezone(LUX_TZ).date().isoformat()
+        dt = dt.replace(tzinfo=timezone.utc)
+    utc_dt = dt.astimezone(timezone.utc)
+    local_dt = utc_dt + timedelta(hours=_luxembourg_offset_hours(utc_dt))
+    return local_dt.date().isoformat()
 
 
 def _covers(adj: dict[str, Any], lux_date: str) -> bool:
