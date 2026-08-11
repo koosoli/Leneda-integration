@@ -3,6 +3,21 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.17.1] - 2026-08-11
+
+### New Features
+- **Prorata Modus for Solar Self-Use:** The self-use priority field is now optional. When a PV system is left without a priority, its self-consumption and export are no longer forced into an invented order — instead each unprioritised system is allocated a share of the house load proportional to what it produced in that same 15-minute interval. Configs with no priority at all therefore run fully pro-rata, which is the fairest default when several systems feed the same house.
+- **Mixed Allocation:** Priorities and pro-rata can be combined. Systems with an explicit priority are served first (1 = consumed first at home); systems that share a priority — or have none — split their tier's self-consumption pro-rata. A tier with one system behaves exactly like the previous strict-priority allocation, so existing configurations are unchanged.
+- **Allocation Method Shown in the UI:** The invoice and the per-system value breakdown state which method produced the split, and each system is labelled "Self-use priority N" or "Pro-rata self-use".
+
+### Bug Fixes
+- **Invoice Total Off by One Cent:** The estimate summed every invoice line at full precision and applied VAT to that raw subtotal, while suppliers price each line to the cent and charge VAT on the sum of the rounded lines. On a real SUDenergie June 2026 bill this produced 79,19 EUR against the printed 79,20 EUR. Every line, the subtotal, the adjustment line, VAT and the total are now rounded exactly as a biller does, in both the dashboard and the Home Assistant sensors, so the displayed lines also add up to the displayed subtotal. Gas invoices and the reference-power comparison use the same rounding.
+
+### Changes
+- Very old configurations migrated from the single legacy feed-in mode no longer receive an arbitrary 1..N priority; they now use Prorata Modus. Configurations that already carry explicit priorities keep them and are calculated exactly as before.
+- Python and TypeScript allocators are covered by mirrored test suites (`tests/test_solar_allocation.py`, `frontend-src/tests/solarAllocation.test.ts`) so the invoice sensors and the dashboard cannot drift apart. The same applies to the invoice rounding (`tests/test_invoice_rounding.py`, `frontend-src/tests/invoiceRounding.test.ts`), which reproduces a real supplier invoice to the cent.
+
+
 ## [v2.16.3] - 2026-08-06
 
 ### Bug Fixes

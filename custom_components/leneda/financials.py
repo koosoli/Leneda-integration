@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import math
 from typing import Any
 
 from .billing_adjustments import compute_billing_adjustments
@@ -76,6 +78,9 @@ class WindowedUsage:
     gross_exceedance_kwh: float
     avoided_exceedance_kwh: float
     peak_power_kw: float
+    # One (label, rate, kwh) entry per applied tariff window. Each is billed as
+    # its own invoice line, so each is rounded to cents separately.
+    rate_breakdown: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,22 @@ class FinancialSummary:
     solar_subsidy_correction: float
     adjustments_estimated: bool
     adjustment_lines: tuple = ()
+
+
+def round_cents(value: float) -> float:
+    """Round a money amount to whole cents, half away from zero.
+
+    Utility invoices price every line to the cent and then sum the rounded
+    lines, so the estimate must round the same way to reach the same total
+    (e.g. 73.327029 EUR of raw lines bills as 73.33 EUR, not 73.32).
+    """
+    try:
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            return 0.0
+        return float(Decimal(str(numeric)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, TypeError, ValueError):
+        return 0.0
 
 
 def get_billing_config(hass) -> BillingConfig:
@@ -152,11 +173,16 @@ def _resolve_ordered_feed_in_rates(
             ),
             None,
         )
-        priority_raw = rate_entry.get("self_use_priority") if rate_entry else idx
-        try:
-            priority = max(1, int(float(priority_raw)))
-        except (TypeError, ValueError):
-            priority = idx
+        priority_raw = rate_entry.get("self_use_priority") if rate_entry else None
+        # A blank/absent priority means the user did not pick an order — that
+        # system is allocated pro-rata to its own production (Prorata Modus).
+        if priority_raw is None or priority_raw == "":
+            priority = None
+        else:
+            try:
+                priority = max(1, int(float(priority_raw)))
+            except (TypeError, ValueError):
+                priority = None
 
         resolved.append(
             {
@@ -167,8 +193,50 @@ def _resolve_ordered_feed_in_rates(
             }
         )
 
-    resolved.sort(key=lambda item: (item["self_use_priority"], item["original_order"]))
+    # Unprioritised systems sort behind prioritised ones and keep their configured order.
+    resolved.sort(
+        key=lambda item: (
+            item["self_use_priority"] is None,
+            item["self_use_priority"] or 0,
+            item["original_order"],
+        )
+    )
     return resolved
+
+
+def _group_into_priority_tiers(
+    resolved_rates: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    """Group already-sorted rates into tiers that share the same self-use priority.
+
+    Each tier is served in turn from the remaining house load and its members
+    split that tier's self-consumption pro-rata to their own production. A tier
+    holding a single system is identical to strict priority allocation, and a
+    config with no priorities at all collapses into one pro-rata tier.
+    """
+    tiers: list[list[dict[str, Any]]] = []
+    current_key: object = object()
+    for rate in resolved_rates:
+        key = rate["self_use_priority"]
+        if tiers and key == current_key:
+            tiers[-1].append(rate)
+            continue
+        tiers.append([rate])
+        current_key = key
+    return tiers
+
+
+def resolve_allocation_mode(resolved_rates: list[dict[str, Any]]) -> str:
+    """Classify the allocation as 'priority', 'prorata' or 'mixed'."""
+    if not resolved_rates:
+        return "prorata"
+    explicit = [rate for rate in resolved_rates if rate["self_use_priority"] is not None]
+    if not explicit:
+        return "prorata"
+    if len(explicit) < len(resolved_rates):
+        return "mixed"
+    distinct = {rate["self_use_priority"] for rate in explicit}
+    return "priority" if len(distinct) == len(explicit) else "mixed"
 
 
 def _build_value_map(items: list[dict[str, Any]]) -> dict[str, float]:
@@ -192,7 +260,13 @@ def _allocate_priority_solar(
     official_self_consumed_kwh: float,
     official_exported_kwh: float,
 ) -> dict[str, float] | None:
-    """Allocate self-consumption and export by configured PV priority."""
+    """Allocate self-consumption and export across PV systems.
+
+    Systems with an explicit self-use priority are served in that order;
+    systems sharing a priority — including all systems left blank, which is the
+    Prorata Modus default — split their tier's self-consumption in proportion
+    to what each produced in that 15-minute interval.
+    """
     if not consumption_items or not per_meter_production_items or not resolved_rates:
         return None
 
@@ -218,16 +292,29 @@ def _allocate_priority_solar(
         for rate in resolved_rates
     }
 
+    tiers = _group_into_priority_tiers(resolved_rates)
+
     for timestamp in sorted(timestamps):
         remaining_house_kw = max(0.0, house_by_ts.get(timestamp, 0.0))
-        for rate in resolved_rates:
-            meter_id = rate["meter_id"]
-            solar_kw = max(0.0, production_by_meter.get(meter_id, {}).get(timestamp, 0.0))
-            self_used_kw = min(remaining_house_kw, solar_kw)
-            totals[meter_id]["produced_kwh"] += solar_kw * 0.25
-            totals[meter_id]["self_consumed_kwh"] += self_used_kw * 0.25
-            totals[meter_id]["exported_kwh"] += max(0.0, solar_kw - self_used_kw) * 0.25
-            remaining_house_kw = max(0.0, remaining_house_kw - self_used_kw)
+        for tier in tiers:
+            tier_solar_kw = [
+                max(0.0, production_by_meter.get(rate["meter_id"], {}).get(timestamp, 0.0))
+                for rate in tier
+            ]
+            tier_total_kw = sum(tier_solar_kw)
+            if tier_total_kw <= 0:
+                continue
+
+            tier_self_used_kw = min(remaining_house_kw, tier_total_kw)
+            for rate, solar_kw in zip(tier, tier_solar_kw):
+                meter_id = rate["meter_id"]
+                # Pro-rata split of this tier's self-consumption by own production
+                self_used_kw = tier_self_used_kw * (solar_kw / tier_total_kw)
+                totals[meter_id]["produced_kwh"] += solar_kw * 0.25
+                totals[meter_id]["self_consumed_kwh"] += self_used_kw * 0.25
+                totals[meter_id]["exported_kwh"] += max(0.0, solar_kw - self_used_kw) * 0.25
+
+            remaining_house_kw = max(0.0, remaining_house_kw - tier_self_used_kw)
 
     raw_self_consumed = sum(item["self_consumed_kwh"] for item in totals.values())
     raw_exported = sum(item["exported_kwh"] for item in totals.values())
@@ -250,6 +337,8 @@ def _allocate_priority_solar(
         "weighted_export_rate": (
             total_feed_in_revenue / target_exported if target_exported > 0 else 0.0
         ),
+        "allocation_mode": resolve_allocation_mode(resolved_rates),
+        "per_meter": totals,
     }
 
 
@@ -287,8 +376,8 @@ def _matches_window(dt: datetime, day_group: str, start_time: str, end_time: str
     return now_minutes >= start_minutes or now_minutes < end_minutes
 
 
-def _find_matching_window(dt: datetime, windows: list[dict[str, Any]], field: str) -> Any:
-    """Return the configured field value for a matching window."""
+def _find_matching_window_entry(dt: datetime, windows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the first window configuration matching the datetime."""
     for window in windows:
         if not isinstance(window, dict):
             continue
@@ -298,8 +387,14 @@ def _find_matching_window(dt: datetime, windows: list[dict[str, Any]], field: st
             window.get("start_time", "00:00"),
             window.get("end_time", "00:00"),
         ):
-            return window.get(field)
+            return window
     return None
+
+
+def _find_matching_window(dt: datetime, windows: list[dict[str, Any]], field: str) -> Any:
+    """Return the configured field value for a matching window."""
+    window = _find_matching_window_entry(dt, windows)
+    return window.get(field) if window is not None else None
 
 
 def calculate_windowed_usage(
@@ -316,6 +411,7 @@ def calculate_windowed_usage(
     gross_exceedance_kwh = 0.0
     peak_power_kw = 0.0
     production_by_ts: dict[str, float] = {}
+    breakdown: dict[tuple[str, float], dict[str, Any]] = {}
 
     for item in production_items or []:
         try:
@@ -335,11 +431,13 @@ def calculate_windowed_usage(
         kwh = kw * 0.25
         solar_kw = production_by_ts.get(timestamp, 0.0)
         net_kw = max(0.0, kw - solar_kw)
-        applied_rate = _find_matching_window(parsed_ts, rate_windows, "rate")
+        rate_window = _find_matching_window_entry(parsed_ts, rate_windows)
+        applied_rate = rate_window.get("rate") if rate_window is not None else None
         applied_reference = _find_matching_window(
             parsed_ts, reference_windows, "reference_power_kw"
         )
         effective_rate = float(applied_rate) if applied_rate not in (None, "") else base_rate
+        applied_label = str((rate_window or {}).get("label") or "").strip() or "Base tariff"
         effective_reference = (
             float(applied_reference)
             if applied_reference not in (None, "")
@@ -353,12 +451,20 @@ def calculate_windowed_usage(
         if net_kw > effective_reference:
             exceedance_kwh += (net_kw - effective_reference) * 0.25
 
+        key = (applied_label, effective_rate)
+        entry = breakdown.get(key)
+        if entry is None:
+            breakdown[key] = {"label": applied_label, "rate": effective_rate, "kwh": kwh}
+        else:
+            entry["kwh"] += kwh
+
     return WindowedUsage(
         energy_cost=energy_cost,
         exceedance_kwh=exceedance_kwh,
         gross_exceedance_kwh=gross_exceedance_kwh,
         avoided_exceedance_kwh=max(0.0, gross_exceedance_kwh - exceedance_kwh),
         peak_power_kw=peak_power_kw,
+        rate_breakdown=tuple(sorted(breakdown.values(), key=lambda entry: entry["label"])),
     )
 
 
@@ -499,25 +605,35 @@ def calculate_financial_summary(
     )
     network_variable_cost = billed_consumption * float(billing_config.network_variable_rate or 0.0)
     exceedance_cost = effective_exceedance_kwh * float(billing_config.exceedance_rate or 0.0)
-    meter_fees_total = sum(
-        float(fee.get("fee") or 0.0)
+    meter_fee_lines = [
+        float(fee.get("fee") or 0.0) * pro_factor
         for fee in (billing_config.meter_monthly_fees or [])
         if isinstance(fee, dict)
-    ) * pro_factor
+    ]
+    meter_fees_total = sum(meter_fee_lines)
 
-    subtotal_costs = (
-        float(billing_config.energy_fixed_fee or 0.0) * pro_factor
-        + energy_cost
-        + float(billing_config.network_metering_rate or 0.0) * pro_factor
-        + float(billing_config.network_power_ref_rate or 0.0) * pro_factor
-        + network_variable_cost
-        + exceedance_cost
-        + meter_fees_total
-        + billed_consumption * float(billing_config.compensation_fund_rate or 0.0)
-        + billed_consumption * float(billing_config.electricity_tax_rate or 0.0)
-        - max(0.0, float(getattr(billing_config, "domiciliation_discount", 0.0) or 0.0)) * pro_factor
-        - max(0.0, float(billing_config.connect_discount or 0.0)) * pro_factor
+    # A utility prices each invoice line to the cent and then adds the rounded
+    # lines up, so the subtotal is built the same way here. Summing raw values
+    # instead would drift up to a cent away from the supplier's total.
+    energy_cost_lines = (
+        [float(entry["kwh"]) * float(entry["rate"]) for entry in windowed_usage.rate_breakdown]
+        if uses_tariff_windows and windowed_usage is not None and windowed_usage.rate_breakdown
+        else [energy_cost]
     )
+    invoice_lines = [
+        *energy_cost_lines,
+        float(billing_config.energy_fixed_fee or 0.0) * pro_factor,
+        float(billing_config.network_metering_rate or 0.0) * pro_factor,
+        float(billing_config.network_power_ref_rate or 0.0) * pro_factor,
+        network_variable_cost,
+        exceedance_cost,
+        *meter_fee_lines,
+        billed_consumption * float(billing_config.compensation_fund_rate or 0.0),
+        billed_consumption * float(billing_config.electricity_tax_rate or 0.0),
+        -max(0.0, float(getattr(billing_config, "domiciliation_discount", 0.0) or 0.0)) * pro_factor,
+        -max(0.0, float(billing_config.connect_discount or 0.0)) * pro_factor,
+    ]
+    subtotal_costs = round_cents(sum(round_cents(amount) for amount in invoice_lines))
 
     # Dated billing adjustments (e.g. Luxembourg 2026 subsidies) are subtracted
     # as net amounts before VAT so the final gross reduction matches the
@@ -538,9 +654,14 @@ def calculate_financial_summary(
     electricity_adj = adjustments["electricity"]
     gas_adj = adjustments["gas"]
 
+    # Adjustments are their own invoice line, so they are rounded like one, and
+    # VAT is charged on the rounded subtotal exactly as the supplier does.
     subtotal_costs_before_adjustments = subtotal_costs
-    subtotal_costs = subtotal_costs - float(electricity_adj["applied_net"])
-    total_costs = subtotal_costs * (1 + float(billing_config.vat_rate or 0.0))
+    subtotal_costs = round_cents(
+        subtotal_costs - round_cents(float(electricity_adj["applied_net"]))
+    )
+    electricity_vat = round_cents(subtotal_costs * float(billing_config.vat_rate or 0.0))
+    total_costs = round_cents(subtotal_costs + electricity_vat)
 
     priority_allocation = _allocate_priority_solar(
         consumption_items or [],
@@ -594,15 +715,22 @@ def calculate_financial_summary(
         + feed_in_revenue
     )
 
-    gas_subtotal = (
-        float(billing_config.gas_fixed_fee or 0.0) * pro_factor
-        + gas_energy * float(billing_config.gas_variable_rate or 0.0)
-        + float(billing_config.gas_network_fee or 0.0) * pro_factor
-        + gas_energy * float(billing_config.gas_network_variable_rate or 0.0)
-        + gas_energy * float(billing_config.gas_tax_rate or 0.0)
+    # Same per-line cent rounding as the electricity invoice above.
+    gas_subtotal = round_cents(
+        sum(
+            round_cents(amount)
+            for amount in (
+                float(billing_config.gas_fixed_fee or 0.0) * pro_factor,
+                gas_energy * float(billing_config.gas_variable_rate or 0.0),
+                float(billing_config.gas_network_fee or 0.0) * pro_factor,
+                gas_energy * float(billing_config.gas_network_variable_rate or 0.0),
+                gas_energy * float(billing_config.gas_tax_rate or 0.0),
+            )
+        )
     )
-    gas_subtotal = gas_subtotal - float(gas_adj["applied_net"])
-    gas_total = gas_subtotal * (1 + float(billing_config.gas_vat_rate or 0.0)) if has_gas else 0.0
+    gas_subtotal = round_cents(gas_subtotal - round_cents(float(gas_adj["applied_net"])))
+    gas_vat = round_cents(gas_subtotal * float(billing_config.gas_vat_rate or 0.0))
+    gas_total = round_cents(gas_subtotal + gas_vat) if has_gas else 0.0
     electricity_total = total_costs - feed_in_revenue
 
     adjustment_lines = tuple(
@@ -632,7 +760,15 @@ def calculate_financial_summary(
         period_days=days,
         proration_factor=round(pro_factor, 4),
         invoice_before_adjustments=round(
-            (subtotal_costs_before_adjustments * (1 + float(billing_config.vat_rate or 0.0)) - feed_in_revenue)
+            (
+                round_cents(
+                    subtotal_costs_before_adjustments
+                    + round_cents(
+                        subtotal_costs_before_adjustments * float(billing_config.vat_rate or 0.0)
+                    )
+                )
+                - feed_in_revenue
+            )
             + (gas_total + float(gas_adj["applied_gross"])),
             2,
         ),

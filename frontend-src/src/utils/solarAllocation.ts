@@ -5,6 +5,9 @@ import type {
   TimeseriesResponse,
 } from "../api/leneda";
 
+/** How self-consumption is split between PV systems in the same 15-min interval. */
+export type SolarAllocationMode = "priority" | "prorata" | "mixed";
+
 export interface ResolvedFeedInRate {
   meterId: string;
   shortId: string;
@@ -12,7 +15,8 @@ export interface ResolvedFeedInRate {
   rate: number;
   label: string;
   mode: string;
-  selfUsePriority: number;
+  /** null when the user left the priority blank — that system is allocated pro-rata. */
+  selfUsePriority: number | null;
 }
 
 export interface SolarAllocationMeter extends ResolvedFeedInRate {
@@ -29,6 +33,7 @@ export interface SolarAllocationResult {
   totalSelfUseExportEquivalent: number;
   weightedExportRate: number;
   usedPriorityAllocation: boolean;
+  allocationMode: SolarAllocationMode;
 }
 
 interface AllocationTargets {
@@ -111,10 +116,13 @@ export function resolveProductionFeedInRates(config: BillingConfig): ResolvedFee
       const effectiveRate = sensorOk
         ? rateConfig?.sensor_value ?? 0
         : finiteOr(rateConfig?.tariff, finiteOr(config.feed_in_tariff, 0));
-      const selfUsePriority = Math.max(
-        1,
-        Math.round(finiteOr(rateConfig?.self_use_priority, idx + 1)),
-      );
+      // A blank/absent priority means "no explicit order" — those systems are
+      // allocated pro-rata to their own production (Prorata Modus).
+      const rawPriority = rateConfig?.self_use_priority;
+      const selfUsePriority =
+        rawPriority == null || rawPriority === ("" as unknown) || !Number.isFinite(Number(rawPriority))
+          ? null
+          : Math.max(1, Math.round(Number(rawPriority)));
       const displayName = resolveSolarSystemName(meter.id, idx + 1, rateConfig?.display_name);
 
       return {
@@ -129,12 +137,65 @@ export function resolveProductionFeedInRates(config: BillingConfig): ResolvedFee
         selfUsePriority,
       };
     })
+    .map((rate, order) => ({ rate, order }))
     .sort((a, b) => {
-      if (a.selfUsePriority !== b.selfUsePriority) {
-        return a.selfUsePriority - b.selfUsePriority;
-      }
-      return a.meterId.localeCompare(b.meterId);
-    });
+      // Unprioritised systems always sort behind prioritised ones; ties keep
+      // their configured order and are later split pro-rata.
+      const aKey = a.rate.selfUsePriority ?? Number.POSITIVE_INFINITY;
+      const bKey = b.rate.selfUsePriority ?? Number.POSITIVE_INFINITY;
+      if (aKey !== bKey) return aKey - bKey;
+      return a.order - b.order;
+    })
+    .map((entry) => entry.rate);
+}
+
+/** Short per-system label describing how its self-consumption was allocated. */
+export function selfUsePriorityLabel(priority: number | null): string {
+  return priority == null ? "Pro-rata self-use" : `Self-use priority ${priority}`;
+}
+
+/** One-line explanation of the allocation method, shown under the breakdowns. */
+export function allocationModeExplanation(mode: SolarAllocationMode): string {
+  if (mode === "prorata") {
+    return "Prorata Modus: no self-use priority is configured, so each PV system's self-consumption and export are shared in proportion to what it produced in each 15-minute interval.";
+  }
+  if (mode === "mixed") {
+    return "Per-system self-consumption and export are allocated from each PV system's 15-minute production: systems with a self-use priority are served first (1 = consumed first at home), and systems sharing or missing a priority split the rest pro-rata to their own production.";
+  }
+  return "Per-system self-consumption and export are allocated from each PV system's 15-minute production using the configured self-use priority (1 = consumed first at home).";
+}
+
+/** Classify how the resolved systems will be allocated, for labelling in the UI. */
+export function resolveAllocationMode(rates: ResolvedFeedInRate[]): SolarAllocationMode {
+  if (!rates.length) return "prorata";
+  const explicit = rates.filter((rate) => rate.selfUsePriority != null);
+  if (explicit.length === 0) return "prorata";
+  if (explicit.length < rates.length) return "mixed";
+  const distinct = new Set(explicit.map((rate) => rate.selfUsePriority));
+  return distinct.size === explicit.length ? "priority" : "mixed";
+}
+
+/**
+ * Group systems that share the same self-use tier.
+ *
+ * Each tier is served in order from the remaining house load; systems inside a
+ * tier split that tier's self-consumption pro-rata to their own production. A
+ * tier with a single system therefore behaves exactly like strict priority
+ * allocation, and configs without any priority collapse to one pro-rata tier.
+ */
+function groupIntoTiers<T extends ResolvedFeedInRate>(rates: T[]): T[][] {
+  const tiers: T[][] = [];
+  let currentKey: number | null | undefined = undefined;
+  for (const rate of rates) {
+    const key = rate.selfUsePriority;
+    if (tiers.length > 0 && key === currentKey) {
+      tiers[tiers.length - 1].push(rate);
+      continue;
+    }
+    tiers.push([rate]);
+    currentKey = key;
+  }
+  return tiers;
 }
 
 export function calculatePrioritySolarAllocation(
@@ -191,23 +252,32 @@ export function calculatePrioritySolarAllocation(
     productionByMeter.set(meter.meter_id, itemMap);
   }
 
+  const tiers = groupIntoTiers(meters);
+
   for (const timestamp of [...allTimestamps].sort()) {
     let remainingHouseKw = Math.max(0, houseByTimestamp.get(timestamp) ?? 0);
-    for (const meter of meters) {
-      const meterIdx = meterIndexById.get(meter.meterId);
-      if (meterIdx == null) continue;
+    for (const tier of tiers) {
+      const tierSolarKw = tier.map((meter) =>
+        Math.max(0, productionByMeter.get(meter.meterId)?.get(timestamp) ?? 0),
+      );
+      const tierTotalKw = tierSolarKw.reduce((sum, kw) => sum + kw, 0);
+      if (tierTotalKw <= 0) continue;
 
-      const solarKw = Math.max(0, productionByMeter.get(meter.meterId)?.get(timestamp) ?? 0);
-      const solarKwh = solarKw * 0.25;
-      const selfConsumedKw = Math.min(remainingHouseKw, solarKw);
-      const selfConsumedKwh = selfConsumedKw * 0.25;
-      const exportedKwh = Math.max(0, solarKw - selfConsumedKw) * 0.25;
+      const tierSelfConsumedKw = Math.min(remainingHouseKw, tierTotalKw);
+      tier.forEach((meter, tierIdx) => {
+        const meterIdx = meterIndexById.get(meter.meterId);
+        if (meterIdx == null) return;
 
-      meters[meterIdx].producedKwh += solarKwh;
-      meters[meterIdx].selfConsumedKwh += selfConsumedKwh;
-      meters[meterIdx].exportedKwh += exportedKwh;
+        const solarKw = tierSolarKw[tierIdx];
+        // Pro-rata split of this tier's self-consumption by own production
+        const selfConsumedKw = tierSelfConsumedKw * (solarKw / tierTotalKw);
 
-      remainingHouseKw = Math.max(0, remainingHouseKw - selfConsumedKw);
+        meters[meterIdx].producedKwh += solarKw * 0.25;
+        meters[meterIdx].selfConsumedKwh += selfConsumedKw * 0.25;
+        meters[meterIdx].exportedKwh += Math.max(0, solarKw - selfConsumedKw) * 0.25;
+      });
+
+      remainingHouseKw = Math.max(0, remainingHouseKw - tierSelfConsumedKw);
     }
   }
 
@@ -239,5 +309,6 @@ export function calculatePrioritySolarAllocation(
     totalSelfUseExportEquivalent,
     weightedExportRate,
     usedPriorityAllocation: true,
+    allocationMode: resolveAllocationMode(resolvedRates),
   };
 }

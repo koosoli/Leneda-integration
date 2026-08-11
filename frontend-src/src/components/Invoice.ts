@@ -17,10 +17,13 @@ import type {
   ReferencePowerWindow,
   TimeseriesItem,
 } from "../api/leneda";
-import { fmtDate, fmtNum } from "../utils/format";
+import { fmtDate, fmtNum, roundCents } from "../utils/format";
 import {
+  allocationModeExplanation,
   calculatePrioritySolarAllocation,
   resolveProductionFeedInRates,
+  selfUsePriorityLabel,
+  type SolarAllocationMode,
 } from "../utils/solarAllocation";
 import { computeBillingAdjustments } from "../utils/billingAdjustments";
 
@@ -386,7 +389,6 @@ export function renderInvoice(state: AppState): string {
 
   // 3b. Per-meter monthly fees (extra metering points)
   const meterFees: MeterMonthlyFee[] = config.meter_monthly_fees ?? [];
-  const meterFeesTotal = meterFees.reduce((s, f) => s + (f.fee || 0), 0) * proFactor;
 
   // 4. Taxes & levies
   const compensationCredit = billedConsumption * config.compensation_fund_rate;
@@ -395,18 +397,29 @@ export function renderInvoice(state: AppState): string {
   const connectDiscount = Math.max(0, config.connect_discount ?? 0) * proFactor;
 
   // 5. Subtotal (costs) — fixed fees are prorated
-  const subtotalCosts =
-    proratedFixedFee +
-    energyCost +
-    proratedMetering +
-    proratedPowerRef +
-    networkVariableCost +
-    exceedanceCost +
-    meterFeesTotal +
-    compensationCredit +
-    electricityTax -
-    domiciliationDiscount -
-    connectDiscount;
+  //    A utility prices each invoice line to the cent and then adds the rounded
+  //    lines up, so the subtotal is built the same way here. Summing raw values
+  //    instead would drift up to a cent away from the supplier's total.
+  const energyCostLines = usesTariffWindows
+    ? windowedUsage!.rateBreakdown.map((entry) => entry.kwh * entry.rate)
+    : [energyCost];
+  const meterFeeLines = meterFees.map((fee) => (fee.fee || 0) * proFactor);
+  const invoiceLines = [
+    ...energyCostLines,
+    proratedFixedFee,
+    proratedMetering,
+    proratedPowerRef,
+    networkVariableCost,
+    exceedanceCost,
+    ...meterFeeLines,
+    compensationCredit,
+    electricityTax,
+    -domiciliationDiscount,
+    -connectDiscount,
+  ];
+  const subtotalCosts = roundCents(
+    invoiceLines.reduce((sum, amount) => sum + roundCents(amount), 0),
+  );
 
   // ── Government aid & dated billing adjustments ──
   // Subtracted as net amounts before VAT so the final gross reduction matches
@@ -432,11 +445,13 @@ export function renderInvoice(state: AppState): string {
   const gasAdjustmentsNet = billingAdjustments.gas.applied_net;
   const adjustmentsEstimated = billingAdjustments.estimated;
 
+  // Adjustments are their own invoice line, so they are rounded like one, and
+  // VAT is charged on the rounded subtotal exactly as the supplier does.
   const subtotalBeforeAdjustments = subtotalCosts;
-  const subtotalAfterAdjustments = subtotalCosts - electricityAdjustmentsNet;
+  const subtotalAfterAdjustments = roundCents(subtotalCosts - roundCents(electricityAdjustmentsNet));
 
-  const vat = subtotalAfterAdjustments * config.vat_rate;
-  const totalCosts = subtotalAfterAdjustments + vat;
+  const vat = roundCents(subtotalAfterAdjustments * config.vat_rate);
+  const totalCosts = roundCents(subtotalAfterAdjustments + vat);
 
   // 6. Feed-in revenue (per-production-meter rates)
   //    When per-meter 15-minute production is available, self-use/export is
@@ -476,6 +491,8 @@ export function renderInvoice(state: AppState): string {
       exportEquivalentForSelfUse: 0,
     }));
   const usesPrioritySolarAllocation = !!prioritySolarAllocation;
+  const solarAllocationMode: SolarAllocationMode =
+    prioritySolarAllocation?.allocationMode ?? "prorata";
   const allocatedSelfConsumed = prioritySolarAllocation
     ? prioritySolarAllocation.meters.reduce((sum, meter) => sum + meter.selfConsumedKwh, 0)
     : directSolarToHome;
@@ -523,11 +540,17 @@ export function renderInvoice(state: AppState): string {
   const gasNetworkFee = (config.gas_network_fee ?? 4.80) * proFactor;
   const gasNetworkVariableCost = gasEnergy * (config.gas_network_variable_rate ?? 0.0120);
   const gasTax = gasEnergy * (config.gas_tax_rate ?? 0.0010);
-  const gasSubtotal = gasFixedFee + gasVariableCost + gasNetworkFee + gasNetworkVariableCost + gasTax;
+  // Same per-line cent rounding as the electricity invoice above.
+  const gasSubtotal = roundCents(
+    [gasFixedFee, gasVariableCost, gasNetworkFee, gasNetworkVariableCost, gasTax].reduce(
+      (sum, amount) => sum + roundCents(amount),
+      0,
+    ),
+  );
   const gasSubtotalBeforeAdjustments = gasSubtotal;
-  const gasSubtotalAfterAdjustments = gasSubtotal - gasAdjustmentsNet;
-  const gasVat = gasSubtotalAfterAdjustments * (config.gas_vat_rate ?? 0.08);
-  const gasTotalCosts = gasSubtotalAfterAdjustments + gasVat;
+  const gasSubtotalAfterAdjustments = roundCents(gasSubtotal - roundCents(gasAdjustmentsNet));
+  const gasVat = roundCents(gasSubtotalAfterAdjustments * (config.gas_vat_rate ?? 0.08));
+  const gasTotalCosts = roundCents(gasSubtotalAfterAdjustments + gasVat);
 
   const currency = config.currency || "EUR";
   const fmt = (v: number) => `${fmtNum(v, 2)} ${currency}`;
@@ -561,7 +584,9 @@ export function renderInvoice(state: AppState): string {
     }).join("");
   const electricityAdjustmentRows = renderAdjustmentRows(electricityAdjustmentLines, config.vat_rate);
   const gasAdjustmentRows = renderAdjustmentRows(gasAdjustmentLines, config.gas_vat_rate ?? 0.08);
-  const totalElectricityBeforeAdjustments = subtotalBeforeAdjustments * (1 + config.vat_rate);
+  const totalElectricityBeforeAdjustments = roundCents(
+    subtotalBeforeAdjustments + roundCents(subtotalBeforeAdjustments * config.vat_rate),
+  );
   const hasAnyAdjustmentLines = electricityAdjustmentLines.length > 0;
   const hasAnyGasAdjustmentLines = gasAdjustmentLines.length > 0;
   const perSystemSolarBreakdownRows = hasPerSystemSolarBreakdown
@@ -575,7 +600,7 @@ export function renderInvoice(state: AppState): string {
                 Produced ${fmtKwh(r.producedKwh)} kWh<br/>
                 Kept on-site ${fmtKwh(r.selfConsumedKwh)} kWh<br/>
                 Sold ${fmtKwh(r.exportedKwh)} kWh<br/>
-                ${r.label} ${fmtNum(r.rate, 4)} ${currency}/kWh${hasMultipleRates ? `<br/>Self-use priority ${r.selfUsePriority}` : ""}
+                ${r.label} ${fmtNum(r.rate, 4)} ${currency}/kWh${hasMultipleRates ? `<br/>${selfUsePriorityLabel(r.selfUsePriority)}` : ""}
               </td>
               <td style="text-align: right;">
                 <strong>${fmt(r.totalTrackedValue)}</strong><br/>
@@ -591,12 +616,15 @@ export function renderInvoice(state: AppState): string {
       `
     : "";
   const selfUseVsExportDetail = usesPrioritySolarAllocation
-    ? `Compared with exporting the same ${fmtKwh(selfConsumed)} kWh using the configured PV self-use priority and each system's own feed-in tariff`
+    ? `Compared with exporting the same ${fmtKwh(selfConsumed)} kWh using ${solarAllocationMode === "prorata" ? "a pro-rata split across the PV systems" : "the configured PV self-use priority"} and each system's own feed-in tariff`
     : `Compared with selling the same ${fmtKwh(selfConsumed)} kWh at ${fmtNum(avgFeedInRate, 4)} ${currency}/kWh`;
   const currentReferenceLevel = CREOS_REFERENCE_POWER_LEVELS.find(
     (level) => Math.abs(level.kw - refPower) < 0.05,
   );
-  const baseSubtotalWithoutReferencePower = subtotalCosts - proratedPowerRef - exceedanceCost;
+  // subtotalCosts is a sum of cent-rounded lines, so the two lines removed here
+  // must be rounded the same way for the simulated totals to stay comparable.
+  const baseSubtotalWithoutReferencePower =
+    subtotalCosts - roundCents(proratedPowerRef) - roundCents(exceedanceCost);
   const referencePowerComparison = windowedUsage
     ? CREOS_REFERENCE_POWER_LEVELS.map((level) => {
       const simulatedUsage = calculateWindowedUsage(
@@ -609,8 +637,10 @@ export function renderInvoice(state: AppState): string {
       );
       const fixedCharge = level.fixedMonthlyFee * proFactor;
       const comparisonExceedanceCharge = simulatedUsage.exceedanceKwh * config.exceedance_rate;
-      const simulatedSubtotal = baseSubtotalWithoutReferencePower + fixedCharge + comparisonExceedanceCharge;
-      const total = simulatedSubtotal * (1 + config.vat_rate);
+      const simulatedSubtotal = roundCents(
+        baseSubtotalWithoutReferencePower + roundCents(fixedCharge) + roundCents(comparisonExceedanceCharge),
+      );
+      const total = roundCents(simulatedSubtotal + roundCents(simulatedSubtotal * config.vat_rate));
 
       return {
         ...level,
@@ -968,7 +998,7 @@ export function renderInvoice(state: AppState): string {
             ${feedInRows.map((r) => `
             <tr class="revenue-row">
               <td>Exported (${hasMultipleRates ? r.displayName : fmtKwh(r.exportedKwh) + " kWh"})</td>
-              <td style="text-align: right;">${hasMultipleRates ? `${r.shortId}<br/>` : ""}${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>Self-use priority ${r.selfUsePriority}` : ""}</td>
+              <td style="text-align: right;">${hasMultipleRates ? `${r.shortId}<br/>` : ""}${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>${selfUsePriorityLabel(r.selfUsePriority)}` : ""}</td>
               <td class="revenue-amount" style="text-align: right;">-${fmt(r.revenue)}</td>
             </tr>
             `).join("")}
@@ -1089,7 +1119,7 @@ export function renderInvoice(state: AppState): string {
             ${hasGasAdjustments ? `
             <tr class="subtotal-row">
               <td colspan="2">Gas total before billing adjustments (incl. VAT)</td>
-              <td style="text-align: right;">${fmt(gasSubtotalBeforeAdjustments * (1 + (config.gas_vat_rate ?? 0.08)))}</td>
+              <td style="text-align: right;">${fmt(roundCents(gasSubtotalBeforeAdjustments + roundCents(gasSubtotalBeforeAdjustments * (config.gas_vat_rate ?? 0.08))))}</td>
             </tr>
             ` : ""}
           </tbody>
@@ -1240,7 +1270,7 @@ export function renderInvoice(state: AppState): string {
             ${feedInRows.map((r) => `
             <tr>
               <td>Sold to grid ${hasMultipleRates ? `(${r.displayName})` : `(${fmtKwh(r.exportedKwh)} kWh)`}</td>
-              <td style="text-align: right;">${hasMultipleRates ? `${r.shortId}<br/>` : ""}${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>Self-use priority ${r.selfUsePriority}` : ""}</td>
+              <td style="text-align: right;">${hasMultipleRates ? `${r.shortId}<br/>` : ""}${fmtKwh(r.exportedKwh)} kWh<br/>${r.label}<br/>${fmtNum(r.rate, 4)} ${currency}/kWh${usesPrioritySolarAllocation && hasMultipleRates ? `<br/>${selfUsePriorityLabel(r.selfUsePriority)}` : ""}</td>
               <td style="text-align: right;">${fmt(r.revenue)}</td>
             </tr>
             `).join("")}
@@ -1267,7 +1297,7 @@ export function renderInvoice(state: AppState): string {
           Feed-in revenue = money earned by selling surplus production.
           Per-system tracked value combines each PV system's self-consumption savings and export revenue; reference-power savings stay separate because they are a whole-home grid-load effect.
           ${resolvedRates.some((r) => r.mode === "sensor") ? "Market price sourced from Home Assistant sensor." : "Using fixed feed-in tariff — configure a market price sensor in Settings for real-time rates."}
-          ${usesPrioritySolarAllocation ? "Per-system self-consumption and export are allocated from each PV system's 15-minute production using the configured self-use priority (1 = consumed first at home)." : hasMultipleRates ? "Displayed per-meter feed-in kWh are currently equal-split estimates because per-meter production data was not available for this view." : ""}
+          ${usesPrioritySolarAllocation ? allocationModeExplanation(solarAllocationMode) : hasMultipleRates ? "Displayed per-meter feed-in kWh are currently equal-split estimates because per-meter production data was not available for this view." : ""}
         </p>
       </div>
       ` : ""}

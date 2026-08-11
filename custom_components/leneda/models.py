@@ -194,13 +194,20 @@ class BillingConfig:
         """Build feed_in_rates list — migrate legacy single-mode fields if present."""
         if "feed_in_rates" in data and isinstance(data["feed_in_rates"], list):
             migrated_rates = []
-            for idx, rate in enumerate(data["feed_in_rates"], start=1):
+            for rate in data["feed_in_rates"]:
                 if not isinstance(rate, dict):
                     continue
                 migrated_rate = dict(rate)
-                migrated_rate["self_use_priority"] = int(
-                    cls._coerce_float(migrated_rate.get("self_use_priority"), float(idx))
-                )
+                # A blank/absent priority is preserved as None: those systems are
+                # allocated pro-rata (Prorata Modus) rather than in a made-up order.
+                raw_priority = migrated_rate.get("self_use_priority")
+                if raw_priority is None or raw_priority == "":
+                    migrated_rate["self_use_priority"] = None
+                else:
+                    try:
+                        migrated_rate["self_use_priority"] = max(1, int(float(raw_priority)))
+                    except (TypeError, ValueError):
+                        migrated_rate["self_use_priority"] = None
                 migrated_rates.append(migrated_rate)
             return migrated_rates
         # Legacy migration: single feed_in_mode / feed_in_sensor_entity → rates[]
@@ -218,8 +225,9 @@ class BillingConfig:
                         "mode": mode or "fixed",
                         "tariff": tariff,
                         "sensor_entity": sensor_entity,
-                        "self_use_priority": idx + 1,
+                        # Legacy configs never expressed an order — use Prorata Modus.
+                        "self_use_priority": None,
                     }
-                    for idx, m in enumerate(prod_meters)
+                    for m in prod_meters
                 ]
         return []

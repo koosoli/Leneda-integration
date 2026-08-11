@@ -16,8 +16,10 @@ import type {
 import { fmtDate, fmtDateLong, fmtDateTime, fmtNum } from "../utils/format";
 import { buildEnergyFlowPoints } from "../utils/energyFlow";
 import {
+  allocationModeExplanation,
   calculatePrioritySolarAllocation,
   resolveProductionFeedInRates,
+  selfUsePriorityLabel,
   type SolarAllocationResult,
 } from "../utils/solarAllocation";
 
@@ -1352,7 +1354,7 @@ function renderSolarSystemValueBreakdown(
                 <tr>
                   <td>
                     <strong>${meter.displayName}</strong>
-                    <div class="analysis-stat-meta">${meter.shortId} · priority ${meter.selfUsePriority}</div>
+                    <div class="analysis-stat-meta">${meter.shortId} · ${selfUsePriorityLabel(meter.selfUsePriority)}</div>
                   </td>
                   <td>${fmtNum(meter.rate, 4)} ${currency}/kWh</td>
                   <td>${fmtNum(meter.producedKwh)} kWh</td>
@@ -1377,6 +1379,7 @@ function renderSolarSystemValueBreakdown(
           </tbody>
         </table>
       </div>
+      <p class="analysis-note">${allocationModeExplanation(allocation.allocationMode)}</p>
       <p class="analysis-note">This subtotal includes self-use savings and export revenue. Avoided exceedance value stays only in the overall solar total because it depends on aggregate site load, not a single solar system.</p>
     </div>
   `;

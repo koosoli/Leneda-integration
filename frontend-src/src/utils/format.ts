@@ -11,6 +11,21 @@ function parseDisplayDate(value: string): Date {
   return new Date(value);
 }
 
+/**
+ * Round a money amount to whole cents, half away from zero.
+ *
+ * Utility invoices price every line to the cent and then sum the rounded
+ * lines, so the estimate must round the same way to land on the same total
+ * (e.g. 73.327029 EUR of raw lines bills as 73.33 EUR, not 73.32).
+ */
+export function roundCents(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 0;
+  const sign = value < 0 ? -1 : 1;
+  // toFixed first so binary representations like 28.499999999999996 still
+  // round as the decimal 28.50 a biller would see.
+  return (sign * Math.round(Number((Math.abs(value) * 100).toFixed(6)))) / 100;
+}
+
 /** Format a number with up to `decimals` decimal places. */
 export function fmtNum(value: number | null | undefined, decimals = 2): string {
   if (value == null) return "—";

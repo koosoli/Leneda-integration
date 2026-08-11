@@ -127,8 +127,12 @@ export interface FeedInRate {
   sensor_entity: string;
   /** Optional user-defined display name for this solar system. */
   display_name?: string;
-  /** Lower numbers are consumed first at home before later PV systems. */
-  self_use_priority?: number;
+  /**
+   * Lower numbers are consumed first at home before later PV systems.
+   * null/absent = no explicit order: that system is allocated pro-rata
+   * (Prorata Modus) against the other unprioritised systems.
+   */
+  self_use_priority?: number | null;
   /** Resolved sensor value (set by backend, read-only). */
   sensor_value?: number | null;
 }

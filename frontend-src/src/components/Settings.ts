@@ -558,7 +558,8 @@ export function renderSettings(
       tariff: config?.feed_in_tariff ?? 0.08,
       sensor_entity: "",
       display_name: "",
-      self_use_priority: productionMeters.findIndex((meter) => meter.id === meterId) + 1,
+      // No default order for new systems — blank means Prorata Modus.
+      self_use_priority: null,
     };
   }
 
@@ -596,12 +597,15 @@ export function renderSettings(
                   type="number"
                   min="1"
                   step="1"
-                  value="${r.self_use_priority ?? idx + 1}"
+                  value="${r.self_use_priority ?? ""}"
+                  placeholder="Pro-rata"
                 />
                 <span class="input-unit">1 = used first at home</span>
               </div>
               <p class="muted" style="font-size: var(--text-xs); margin-top: var(--sp-1);">
-                Leave blank to use ${resolveSolarSystemName(m.id, idx + 1)}.
+                Leave blank for <strong>Prorata Modus</strong> — self-consumption is shared between
+                the unprioritised systems in proportion to what each one produced in that
+                15-minute interval.
               </p>
             </div>
             <div class="form-row">

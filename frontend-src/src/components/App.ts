@@ -1229,7 +1229,7 @@ export class LenedaApp {
         tariff: number;
         sensor_entity: string;
         display_name?: string;
-        self_use_priority: number;
+        self_use_priority: number | null;
       }> = [];
       const ratePattern = /^feed_in_rate_(\d+)_(.+)$/;
       const rateMap: Record<string, Record<string, string>> = {};
@@ -1281,13 +1281,19 @@ export class LenedaApp {
         const rm = rateMap[idx];
         const mode = rm.mode ?? "fixed";
         const effectiveTariffStr = mode === "sensor" ? (rm.fallback_tariff ?? rm.tariff) : rm.tariff;
+        // A blank priority is persisted as null so the backend allocates that
+        // system pro-rata instead of inventing an order.
+        const rawPriority = (rm.self_use_priority ?? "").trim();
+        const parsedPriority = parseInt(rawPriority, 10);
         feedInRates.push({
           meter_id: rm.meter_id ?? "",
           mode: mode,
           tariff: parseFloat(effectiveTariffStr ?? "0.08") || 0.08,
           sensor_entity: rm.sensor_entity ?? "",
           display_name: (rm.display_name ?? "").trim(),
-          self_use_priority: Math.max(1, parseInt(rm.self_use_priority ?? `${Number(idx) + 1}`, 10) || Number(idx) + 1),
+          self_use_priority: rawPriority === "" || !isFinite(parsedPriority)
+            ? null
+            : Math.max(1, parsedPriority),
         });
       }
       if (feedInRates.length > 0) data.feed_in_rates = feedInRates;
