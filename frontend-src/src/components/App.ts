@@ -25,7 +25,7 @@ import { renderDashboard } from "./Dashboard";
 import { renderAnalysis } from "./Analysis";
 import { renderSensors } from "./Sensors";
 import { renderInvoice } from "./Invoice";
-import { renderSettings } from "./Settings";
+import { renderSettings, setSectionOpen } from "./Settings";
 import { renderNavBar } from "./NavBar";
 import {
   getChartSpanMs,
@@ -862,7 +862,37 @@ export class LenedaApp {
     this.attachDashboardListeners();
     this.attachAnalysisListeners();
     this.attachInvoiceListeners();
+    this.attachSensorListeners();
     this.attachSettingsListeners();
+  }
+
+  /**
+   * Client-side filter for the sensor tables. Rows carry their searchable
+   * text in data-sensor-search, so filtering never touches the network.
+   */
+  private attachSensorListeners(): void {
+    const filter = this.root.querySelector("#sensor-filter") as HTMLInputElement | null;
+    if (!filter) return;
+
+    const noMatch = this.root.querySelector("#sensors-no-match") as HTMLElement | null;
+
+    filter.addEventListener("input", () => {
+      const query = filter.value.trim().toLowerCase();
+      let visibleTotal = 0;
+
+      this.root.querySelectorAll<HTMLElement>(".sensor-group").forEach((group) => {
+        let visible = 0;
+        group.querySelectorAll<HTMLElement>("[data-sensor-search]").forEach((row) => {
+          const matches = !query || (row.dataset.sensorSearch ?? "").includes(query);
+          row.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        group.hidden = visible === 0;
+        visibleTotal += visible;
+      });
+
+      if (noMatch) noMatch.hidden = visibleTotal > 0;
+    });
   }
 
   private attachNavListeners(): void {
@@ -1458,32 +1488,72 @@ export class LenedaApp {
       }
     }
 
+    // ── Collapsible section state (survives the full re-render) ──
+    this.root.querySelectorAll<HTMLDetailsElement>("details[data-section]").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        setSectionOpen(details.dataset.section ?? "", details.open);
+      });
+    });
+
+    this.root.querySelectorAll<HTMLButtonElement>("[data-sections-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const open = btn.dataset.sectionsToggle === "open";
+        this.root.querySelectorAll<HTMLDetailsElement>("details[data-section]").forEach((details) => {
+          details.open = open;
+          setSectionOpen(details.dataset.section ?? "", open);
+        });
+      });
+    });
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const data = buildConfigPayload();
+      this.setSettingsStatus("Saving…", "pending");
 
       try {
         const { saveConfig: save } = await import("../api/leneda");
         await save(data);
         this.state.config = await fetchConfig();
-        this.render();
+        this.renderPreserveMainScroll();
+        this.setSettingsStatus("Configuration saved", "ok");
       } catch (err) {
-        alert("Failed to save: " + (err instanceof Error ? err.message : err));
+        this.setSettingsStatus(
+          `Save failed: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+        );
       }
     });
 
     const resetBtn = this.root.querySelector("#reset-config-btn");
     resetBtn?.addEventListener("click", async () => {
       if (!confirm("Reset all billing rates to defaults?")) return;
+      this.setSettingsStatus("Resetting…", "pending");
       try {
         const { resetConfig: reset } = await import("../api/leneda");
         await reset();
         this.state.config = await fetchConfig();
-        this.render();
+        this.renderPreserveMainScroll();
+        this.setSettingsStatus("Reset to defaults", "ok");
       } catch (err) {
-        alert("Failed to reset: " + (err instanceof Error ? err.message : err));
+        this.setSettingsStatus(
+          `Reset failed: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+        );
       }
     });
+  }
+
+  /** Inline feedback next to the settings Save button (replaces alert()). */
+  private setSettingsStatus(message: string, tone: "pending" | "ok" | "error"): void {
+    const el = this.root.querySelector("#settings-status");
+    if (!el) return;
+    el.className = `form-status form-status-${tone}`;
+    el.textContent = message;
+    if (tone === "ok") {
+      window.setTimeout(() => {
+        if (el.textContent === message) el.textContent = "";
+      }, 4000);
+    }
   }
 
   private async initChart(canvas: HTMLCanvasElement): Promise<void> {

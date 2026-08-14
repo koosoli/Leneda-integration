@@ -132,6 +132,27 @@ const FIELD_GROUPS: FieldGroup[] = [
   },
 ];
 
+// ── Collapsed/expanded section state ─────────────────────────────
+// The settings form re-renders wholesale on every edit (adding a tariff
+// window, toggling a preset…), so which sections are open lives here
+// instead of in the DOM that gets thrown away.
+
+const openSections = new Set<string>();
+let sectionsInitialized = false;
+
+export function setSectionOpen(title: string, open: boolean): void {
+  if (open) openSections.add(title);
+  else openSections.delete(title);
+}
+
+function isSectionOpen(title: string, defaults: Set<string>): boolean {
+  if (!sectionsInitialized) {
+    sectionsInitialized = true;
+    defaults.forEach((t) => openSections.add(t));
+  }
+  return openSections.has(title);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────
 
 const METER_ROLE_ORDER: MeterType[] = ["consumption", "production", "solar_consumption", "export", "export_consumption", "gas"];
@@ -759,6 +780,10 @@ export function renderSettings(
     </div>
   `;
 
+  // Sections people touch when first setting up stay open; the rest are
+  // collapsed so the form is scannable instead of a 2000px wall of inputs.
+  const DEFAULT_OPEN_SECTIONS = new Set(["Energy Supplier", "Network Operator"]);
+
   const groups = FIELD_GROUPS.map((g) => {
     // Hide gas billing section when no gas meter is configured
     if (g.title === "Gas Billing" && !hasGasMeter) return "";
@@ -787,10 +812,10 @@ export function renderSettings(
     }
 
     return `
-    <div class="form-section">
-      <div class="form-section-title">${g.icon}  ${g.title}</div>
+    <details class="form-section" data-section="${g.title}" ${isSectionOpen(g.title, DEFAULT_OPEN_SECTIONS) ? "open" : ""}>
+      <summary class="form-section-title">${g.icon}  ${g.title}</summary>
       ${content}
-    </div>
+    </details>
   `;
   }).join("");
 
@@ -801,15 +826,22 @@ export function renderSettings(
       <div class="section-header">
         <h2>Billing Configuration</h2>
         <span class="muted">Luxembourg energy billing rates &mdash; adjust values to match your contract</span>
+        ${config ? `
+        <div class="section-header-actions">
+          <button type="button" class="btn btn-ghost" data-sections-toggle="open">Expand all</button>
+          <button type="button" class="btn btn-ghost" data-sections-toggle="close">Collapse all</button>
+        </div>
+        ` : ""}
       </div>
 
       <div class="card">
         <form id="settings-form">
           ${config ? groups : '<p class="muted">Loading configuration…</p>'}
           ${config ? `
-          <div class="form-actions">
+          <div class="form-actions form-actions-sticky">
             <button type="submit" class="btn btn-primary">Save Configuration</button>
             <button type="button" id="reset-config-btn" class="btn btn-outline">Reset to Defaults</button>
+            <span id="settings-status" class="form-status" role="status" aria-live="polite"></span>
           </div>
           ` : ""}
         </form>

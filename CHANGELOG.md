@@ -3,6 +3,31 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [Unreleased]
+
+### Changes
+- **Rebuilt Energy-Flow Diagram:** The scene was redrawn from scratch as its own component (`EnergyFlowScene.ts`). Every satellite — grid, solar, community, gas — is now one node whose badge and text are placed by a single helper, so an icon can no longer land on its own label. Nodes sit in reserved bands that do not intersect the house, links start and end on node boundaries instead of inside the house, and the house keeps its figures inside its body so the column beneath it stays clear. The scene carries its own aspect ratio rather than being forced into a fixed pixel height, and gets taller when a gas meter exists instead of packing gas into occupied space.
+- **New Flow Animation:** Moving SMIL particles with blur filters were replaced by a dim route plus travelling dashes, so apparent speed no longer depends on path length, the effect stops properly under reduced-motion, and the whole diagram is drawn from theme tokens — the old white rails and screen-blended halos only ever looked right in dark mode. Each link's dashes are drawn with a gradient running source → destination, so a flow fades in at its origin and arrives at full strength, and picks up a colour-matched bloom in dark mode only (on a light panel a glow reads as smudge). Links with no energy show a faint track instead of an invisible one. Each link carries an SVG `<title>`, so hovering any path names the flow and its value.
+- **Distinct Community Colour:** Grid export, community-sent and community-received all drew in the same blue, because `--clr-export` and `--clr-primary` are the same value in both themes. A `--clr-community` token (violet) now gives the energy community its own hue in the diagram, the legend and the mobile bars, leaving blue to mean grid export. The palette now reads: red in from the grid, blue out to the grid, green solar, violet community, amber gas.
+- **Richer Scene Detail:** Node badges are built from concentric discs of their own hue so each icon sits in a pool of colour; the house gained gradient roof and body fills, a ridge line, and a real four-cell PV array on the roof instead of a plain bar; the coverage ring got a gradient arc over a soft glow. The panel carries a faint dot grid for texture. The scene's entrance animation is now a fade rather than a slide-and-scale, because it replays on every range change and the movement read as a jump.
+- **Simpler Mobile Diagram:** The mobile scene drops per-node value text — those figures are repeated in the list directly below it — leaving icons, links and the solar-coverage ring. It went from a fixed 500px to roughly 215px on a 375px-wide phone.
+- **Decluttered Dashboard:** The Energy Flow card repeated numbers that were already on the stat cards directly above it — the two large "Period Consumption" / "Solar Production" panels and the summary chip row have been removed. Key Metrics no longer repeats "Self-Consumed" either; it shows "Bought from Grid" instead, a figure that previously appeared only in the flow legend.
+- **One Period Picker Everywhere:** Dashboard, Charts and Invoice each carried their own copy of the range selector, the date bar and the picker. They now share a single `RangeControls` component: preset buttons plus the resolved dates on one line. Non-custom periods no longer render read-only date inputs that look editable.
+- **Clearer Chart Controls:** The chart header mixed unit (kW/kWh) and view (Total Usage/Net Grid/PV Systems) in one five-button strip and printed the visible period twice. The controls are now labelled groups — Period, Detail, Unit, View — and the period is shown once.
+- **Explained Stat Cards:** Each dashboard stat card carries a one-line plain-language description, so "Consumption" versus "Self-Consumed" no longer needs guessing.
+- **Collapsible Settings:** Billing configuration sections are collapsible, with Energy Supplier and Network Operator open by default and Expand/Collapse all buttons. Save and Reset sit in a sticky bar that stays reachable, and report success or failure inline instead of via a browser `alert()`. Open sections survive edits that re-render the form.
+- **Sensor Filter:** The Sensors tab has a filter box that narrows the tables as you type.
+- **Reduced Motion:** The animated flow particles and transitions are disabled when the operating system requests reduced motion.
+
+### Bug Fixes
+- **Gas Node Overlaid the House:** With a gas meter configured, the gas label was drawn at the exact coordinates of the house's "Home usage" caption, and the gas icon overlapped its own label and spilled outside the scene frame. On the mobile scene the gas icon and its label overlapped as well. Gas now occupies a reserved band of its own. A dev harness at `frontend-src/dev/scene-check.html` renders every variant — desktop and mobile, with and without gas, at small and large values — and reports overlapping or out-of-frame elements, so this class of bug is now checkable without a gas meter in the dev credentials.
+- **Solar Icon Overlapped Its Label:** Even without gas, the sun icon was drawn 28px inside the bottom of the "Solar" label card, because icon and label positions were tuned independently.
+- **Unstyled Stat Cards:** "Exported" and "Self-Consumed" were emitted with `class="stat-card.export"` / `class="stat-card.self-consumed"` — a literal dot inside the class name — so both cards rendered without the card background, accent bar and icon colour.
+- **Malformed Dashboard Markup:** The dashboard template closed one `</div>` too many and a `</section>` that was never opened.
+- **Dead GitHub Link:** The navbar linked to the old `Leneda-HACS-integration` repository name.
+- **Hardcoded Version:** The dashboard version was a hardcoded string in a floating overlay. It is now injected from `package.json` at build time and shown in the navbar.
+
+
 ## [v2.17.1] - 2026-08-11
 
 ### New Features

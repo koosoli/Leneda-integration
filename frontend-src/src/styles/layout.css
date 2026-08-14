@@ -123,11 +123,18 @@ a:hover {
   gap: var(--sp-4);
 }
 
-/* ── Range selector ────────────────────────────────────────────── */
+/* ── Period bar (preset buttons + resolved dates) ──────────────── */
+.period-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-6);
+}
+
 .range-selector {
   display: flex;
   gap: var(--sp-1);
-  margin-bottom: var(--sp-4);
   background: var(--clr-surface);
   padding: var(--sp-1);
   border-radius: var(--radius-lg);
@@ -135,14 +142,15 @@ a:hover {
   width: fit-content;
 }
 
-.range-info-bar {
+.period-bar-dates {
   font-size: var(--text-sm);
-  color: var(--clr-muted);
-  margin-bottom: var(--sp-6);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--clr-text-secondary);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-full);
+  background: var(--clr-surface-alt);
+  border: 1px solid var(--clr-border-subtle);
+  white-space: nowrap;
   animation: fade-in 0.3s var(--ease);
 }
 
@@ -199,28 +207,6 @@ a:hover {
   box-shadow: 0 0 0 3px var(--clr-primary-muted);
 }
 
-.period-preview {
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--clr-surface-alt);
-  border: 1px solid var(--clr-border);
-  border-radius: var(--radius-md);
-}
-
-.period-preview-label {
-  font-size: var(--text-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--clr-text-secondary);
-}
-
-.period-preview input[type="date"][readonly] {
-  background: var(--clr-surface);
-  color: var(--clr-text);
-  opacity: 1;
-  cursor: default;
-}
-
 /* ── Chart container ───────────────────────────────────────────── */
 .chart-section {
   margin-top: var(--sp-6);
@@ -241,41 +227,36 @@ a:hover {
   flex: 0 1 auto;
 }
 
-.chart-period-status {
-  display: inline-flex;
-  align-items: center;
+.chart-control-stack {
+  display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin-top: var(--sp-2);
-  flex: 1 1 260px;
-  color: var(--clr-text-secondary);
-  font-size: var(--text-sm);
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: var(--sp-2) var(--sp-4);
+  flex: 1 1 560px;
 }
 
-.chart-period-status strong {
-  color: var(--clr-text);
-  font-weight: 700;
+/* Each toggle row gets its own caption so "kW" and "Net Grid"
+   are visibly different questions, not one 5-way switch. */
+.chart-control-group {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
 }
 
-.chart-period-kicker {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  background: var(--clr-primary-muted);
-  color: var(--clr-primary);
+/* The period stepper gets its own row so the three toggles below it
+   line up as a single band instead of wrapping unpredictably. */
+.chart-control-group-wide {
+  flex: 1 1 100%;
+  justify-items: end;
+}
+
+.chart-control-label {
   font-size: var(--text-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-}
-
-.chart-control-stack {
-  display: grid;
-  gap: var(--sp-2);
-  justify-items: end;
-  min-width: min(100%, 760px);
-  flex: 1 1 560px;
+  color: var(--clr-muted);
 }
 
 .chart-period-controls {
@@ -381,6 +362,9 @@ a:hover {
 }
 
 .chart-hint {
+  margin-top: var(--sp-2);
+  text-align: center;
+  font-size: var(--text-xs);
   opacity: 0.5;
   transition: opacity 0.3s;
 }
@@ -401,84 +385,16 @@ a:hover {
   height: 100% !important;
 }
 
-/* ── Leneda Elite Energy Flow (Avant-Garde Overhaul) ──────────── */
+/* ── Energy flow scene ─────────────────────────────────────────── */
 .leneda-elite-flow {
   position: relative;
   width: 100%;
-  padding: var(--sp-8);
-  background:
-    radial-gradient(circle at 50% 0%, rgba(88, 166, 255, 0.12), transparent 36%),
-    radial-gradient(circle at 14% 78%, rgba(248, 81, 73, 0.08), transparent 22%),
-    radial-gradient(circle at 84% 22%, rgba(63, 185, 80, 0.08), transparent 24%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
-    var(--clr-bg);
+  padding: var(--sp-5);
+  background: var(--clr-bg);
   border-radius: var(--radius-xl);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--clr-border-subtle);
   overflow: hidden;
-  animation: scene-entrance 0.8s var(--ease-out);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 22px 48px rgba(0, 0, 0, 0.16);
-}
-
-.leneda-elite-flow::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.022) 48%, transparent 100%),
-    radial-gradient(circle at 22% 80%, rgba(248, 81, 73, 0.08), transparent 26%),
-    radial-gradient(circle at 80% 24%, rgba(63, 185, 80, 0.08), transparent 26%);
-  pointer-events: none;
-}
-
-.elite-header {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-6);
-  margin-bottom: var(--sp-10);
-  position: relative;
-  z-index: 1;
-}
-
-.flow-scene-summary {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-3);
-}
-
-.flow-scene-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 var(--sp-3);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--clr-overlay-border);
-  background: var(--clr-overlay);
-  color: var(--clr-text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.flow-scene-chip.solar {
-  color: var(--clr-production);
-}
-
-.flow-scene-chip.import {
-  color: var(--clr-consumption);
-}
-
-.flow-scene-chip.export,
-.flow-scene-chip.community {
-  color: var(--clr-primary);
-}
-
-.flow-scene-chip.neutral {
-  color: var(--clr-text);
+  animation: scene-entrance 0.35s var(--ease-out);
 }
 
 .flow-scene-caption {
@@ -491,104 +407,8 @@ a:hover {
   line-height: 1.55;
 }
 
-/* Glass Floating Modules */
-.glass-module {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-6);
-  background: rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl);
-  overflow: hidden;
-  transition: transform 0.3s var(--ease-spring), border-color 0.3s var(--ease);
-}
-
-.glass-module:hover {
-  transform: translateY(-4px);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.module-info {
-  position: relative;
-  z-index: 2;
-}
-
-.module-label {
-  display: block;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--clr-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  margin-bottom: var(--sp-2);
-}
-
-.module-value-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-}
-
-.module-value {
-  font-size: var(--text-4xl);
-  font-weight: 900;
-  letter-spacing: -0.04em;
-  line-height: 1;
-}
-
-.module-unit {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--clr-muted);
-}
-
-.module-visual {
-  position: absolute;
-  right: -20px;
-  bottom: -20px;
-  width: 120px;
-  height: 120px;
-  opacity: 0.15;
-}
-
-.wave-bg {
-  width: 100%;
-  height: 100%;
-  border-radius: 40%;
-  animation: wave-rotate 8s linear infinite;
-}
-
-.wave-bg.red {
-  background: var(--clr-consumption);
-}
-
-.wave-bg.green {
-  background: var(--clr-production);
-}
-
-.consumption-module {
-  box-shadow: 0 18px 40px rgba(248, 81, 73, 0.08);
-}
-
-.production-module {
-  box-shadow: 0 18px 40px rgba(63, 185, 80, 0.08);
-}
-
-@keyframes wave-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Central Immersive Scene */
+/* The SVG carries its own aspect ratio, so the box always fits the
+   composition instead of the composition fighting a fixed height. */
 .elite-scene {
   position: relative;
   width: 100%;
@@ -597,131 +417,193 @@ a:hover {
 
 .elite-scene-desktop {
   display: block;
-  height: 430px;
 }
 
 .elite-scene-mobile {
   display: none;
-  height: 500px;
-}
-
-.elite-scene::before {
-  content: "";
-  position: absolute;
-  inset: 22px 18% 38px;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(88, 166, 255, 0.08), rgba(88, 166, 255, 0));
-  filter: blur(20px);
-  pointer-events: none;
 }
 
 .elite-main-svg {
+  display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
 }
 
-.scene-node-label {
-  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.12));
+.scene-shell {
+  stroke: var(--clr-border-subtle);
+}
+
+.scene-grid-dot {
+  fill: var(--clr-border);
+  opacity: 0.5;
+}
+
+/* ── Scene nodes ───────────────────────────────────────────────── */
+.scene-node-badge {
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.16));
+}
+
+/* Concentric discs of the node's own hue, so the icon sits in a pool of
+   colour rather than on a flat circle. */
+.scene-node-aura {
+  opacity: 0.05;
+}
+
+.scene-node-halo {
+  opacity: 0.11;
+}
+
+.scene-node-plate {
+  stroke-width: 1.7;
+}
+
+.scene-node-wash {
+  opacity: 0.07;
+}
+
+.scene-node-glyph {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .scene-node-kicker {
   fill: var(--clr-muted);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
 .scene-node-value {
   fill: var(--clr-text);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .scene-node-detail {
   fill: var(--clr-muted);
   font-size: 11px;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
-.house-core-kicker {
+/* ── House ─────────────────────────────────────────────────────── */
+.house-roof,
+.house-body {
+  stroke: var(--clr-border);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.house-ridge {
+  stroke: var(--clr-border-subtle);
+  stroke-width: 1.4;
+}
+
+.house-panels {
+  opacity: 0.62;
+}
+
+.house-panel-divider {
+  stroke: var(--clr-surface);
+  stroke-width: 1.2;
+  opacity: 0.75;
+}
+
+.house-ring-plate {
+  stroke: var(--clr-border-subtle);
+  stroke-width: 1.4;
+}
+
+.house-ring-track {
+  stroke: var(--clr-border);
+}
+
+.house-ring-value {
+  transition: stroke-dashoffset var(--duration-lg) var(--ease);
+}
+
+.house-ring-kicker {
   fill: var(--clr-muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
 }
 
-.house-core-value {
+.house-ring-value-text {
   fill: var(--clr-text);
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 .house-total-label {
   fill: var(--clr-muted);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .house-total-value {
   fill: var(--clr-text);
-  font-size: 18px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Elite House Hover Effects */
-.elite-house rect,
-.elite-house path {
-  transition: 0.4s var(--ease);
+/* ── Flow links ────────────────────────────────────────────────── */
+/* A dim track shows the route; dashes travelling along it show the
+   direction. Both take their hue from the group's `color`, so a link
+   is one colour decision. */
+.flow-track {
+  stroke: currentColor;
+  opacity: 0.14;
+  stroke-linecap: round;
 }
 
-.scene-tier-icon {
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.14));
+.flow-pulse {
+  stroke-linecap: round;
+  stroke-dasharray: 9 17;
+  animation: flow-dash 2s linear infinite;
 }
 
-.flow-halo,
-.flow-rail,
-.flow-stream,
-.flow-particle {
-  transition: opacity var(--duration-md) var(--ease);
+.flow-link-idle .flow-track {
+  opacity: 0.07;
 }
 
-.flow-halo {
-  mix-blend-mode: screen;
+/* Bloom reads as light on a dark panel and as smudge on a light one,
+   so it is a dark-theme flourish only. */
+:root[data-theme="dark"] .flow-pulse {
+  filter: drop-shadow(0 0 5px currentColor);
 }
 
-.flow-rail {
-  stroke-dasharray: 0 1 14 10;
-}
+@keyframes flow-dash {
+  from {
+    stroke-dashoffset: 26;
+  }
 
-.flow-stream {
-  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.08));
-}
-
-.flow-particle {
-  opacity: 0.95;
-}
-
-.flow-particle-secondary {
-  opacity: 0.62;
-}
-
-.elite-house:hover path {
-  stroke: var(--clr-text-secondary);
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 /* Animations */
+/* The card is re-rendered on every range change, so this runs often —
+   a fade reads as a refresh, where a slide-and-scale read as a jump. */
 @keyframes scene-entrance {
   from {
     opacity: 0;
-    transform: scale(0.98) translateY(10px);
   }
 
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
   }
 }
 
@@ -799,7 +681,7 @@ a:hover {
 }
 
 .flow-legend-item.community .flow-legend-dot {
-  background: var(--clr-primary);
+  background: var(--clr-community);
 }
 
 .flow-legend-item.gas .flow-legend-dot {
@@ -911,7 +793,7 @@ a:hover {
 }
 
 .mobile-flow-item.community .mobile-flow-bar span {
-  background: linear-gradient(90deg, rgba(88, 166, 255, 0.45), var(--clr-primary));
+  background: linear-gradient(90deg, var(--clr-community-muted), var(--clr-community));
 }
 
 .mobile-flow-item.gas .mobile-flow-bar span {
@@ -919,11 +801,16 @@ a:hover {
 }
 
 /* ── Form layout ───────────────────────────────────────────────── */
+/* Sections are <details>, so a long settings form reads as a list of
+   topics you open one at a time rather than one endless scroll. */
 .form-section {
   margin-bottom: var(--sp-6);
 }
 
 .form-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   font-size: var(--text-xs);
   font-weight: 700;
   text-transform: uppercase;
@@ -932,6 +819,48 @@ a:hover {
   padding: var(--sp-3) 0 var(--sp-2);
   margin-bottom: var(--sp-2);
   border-bottom: 1px solid var(--clr-border-subtle);
+}
+
+summary.form-section-title {
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--duration) var(--ease);
+}
+
+summary.form-section-title::-webkit-details-marker {
+  display: none;
+}
+
+/* Chevron drawn as a border triangle so no icon font is needed. */
+summary.form-section-title::after {
+  content: "";
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg) translate(-2px, 0);
+  transition: transform var(--duration) var(--ease);
+}
+
+details[open] > summary.form-section-title::after {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+summary.form-section-title:hover {
+  color: var(--clr-text);
+}
+
+summary.form-section-title:focus-visible {
+  outline: 2px solid var(--clr-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.section-header-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
 }
 
 .form-row {
@@ -1014,10 +943,40 @@ a:hover {
 
 .form-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-3);
   margin-top: var(--sp-6);
   padding-top: var(--sp-6);
   border-top: 1px solid var(--clr-border);
+}
+
+/* Save stays reachable without scrolling to the bottom of a long form. */
+.form-actions-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: var(--sp-6);
+  padding: var(--sp-4) 0;
+  background: linear-gradient(to top, var(--clr-surface) 72%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.form-status {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.form-status-pending {
+  color: var(--clr-muted);
+}
+
+.form-status-ok {
+  color: var(--clr-production);
+}
+
+.form-status-error {
+  color: var(--clr-danger);
 }
 
 /* ── Meter cards (multi-meter settings UI) ─────────────────────── */
@@ -1397,46 +1356,9 @@ a:hover {
     padding: var(--sp-5) var(--sp-4);
   }
 
-  .elite-header {
-    grid-template-columns: 1fr;
-    gap: var(--sp-3);
-    margin-bottom: var(--sp-6);
-  }
-
-  .flow-scene-summary {
-    gap: var(--sp-2);
-  }
-
-  .flow-scene-chip {
-    white-space: normal;
-  }
-
-  .elite-scene-desktop {
-    height: 360px;
-  }
-
-  .elite-scene-mobile {
-    height: 460px;
-  }
-
-  .scene-node-label {
-    transform: none;
-  }
-
   .flow-legend {
     grid-template-columns: 1fr;
     gap: var(--sp-2);
-  }
-
-  .module-value {
-    font-size: var(--text-2xl);
-  }
-
-  .module-visual {
-    width: 96px;
-    height: 96px;
-    right: -16px;
-    bottom: -16px;
   }
 
   .flow-legend-copy span {
@@ -1485,7 +1407,6 @@ a:hover {
 
   .elite-scene-mobile {
     display: block;
-    height: min(500px, 118vw);
   }
 
   .leneda-elite-flow {
@@ -1508,9 +1429,9 @@ a:hover {
     gap: var(--sp-1);
   }
 
-  .chart-period-status {
-    flex-direction: column;
-    align-items: flex-start;
+  .chart-control-group {
+    width: 100%;
+    justify-items: stretch;
   }
 
   .chart-period-controls {
@@ -1526,14 +1447,6 @@ a:hover {
 
   .leneda-elite-flow {
     padding: var(--sp-4) var(--sp-3);
-  }
-
-  .elite-header {
-    margin-bottom: var(--sp-5);
-  }
-
-  .elite-scene-mobile {
-    height: min(440px, 124vw);
   }
 
   .flow-legend-item {

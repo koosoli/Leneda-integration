@@ -4,7 +4,7 @@ import type {
   AnalysisProfileMetric,
   AppState,
 } from "./App";
-import { RANGES } from "./Dashboard";
+import { RANGES, renderRangeControls } from "./RangeControls";
 import type {
   BillingConfig,
   ConsumptionRateWindow,
@@ -156,12 +156,6 @@ interface LineSeries {
   color: string;
   values: number[];
   dashed?: boolean;
-}
-
-function toDateInputValue(value?: string): string {
-  if (!value) return "";
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : "";
 }
 
 function localDayKey(timestamp: number): string {
@@ -1103,58 +1097,6 @@ function renderProgressBars(
         </div>
       `).join("")}
     </div>
-  `;
-}
-
-function renderRangeControls(state: AppState): string {
-  const periodStartValue = toDateInputValue(state.rangeData?.start ?? state.customStart);
-  const periodEndValue = toDateInputValue(state.rangeData?.end ?? state.customEnd);
-
-  return `
-    <div class="range-selector">
-      ${RANGES.map((range) => `
-        <button
-          class="range-btn ${range.id === state.range ? "active" : ""}"
-          data-range="${range.id}"
-        >${range.label}</button>
-      `).join("")}
-    </div>
-    ${state.rangeData?.start && state.rangeData?.end
-      ? `
-        <div class="range-info-bar">
-          Period: ${fmtDateLong(state.rangeData.start)} - ${fmtDateLong(state.rangeData.end)}
-        </div>
-      `
-      : ""}
-    ${state.range === "custom"
-      ? `
-        <div class="custom-range-picker">
-          <label>
-            <span>From</span>
-            <input type="date" id="custom-start" value="${state.customStart ?? ""}" />
-          </label>
-          <label>
-            <span>To</span>
-            <input type="date" id="custom-end" value="${state.customEnd ?? ""}" />
-          </label>
-          <button class="btn btn-primary" id="apply-custom-range">Apply</button>
-        </div>
-      `
-      : (periodStartValue && periodEndValue)
-        ? `
-          <div class="custom-range-picker period-preview">
-            <span class="period-preview-label">Viewed period</span>
-            <label>
-              <span>From</span>
-              <input type="date" value="${periodStartValue}" readonly aria-label="Preset period start" />
-            </label>
-            <label>
-              <span>To</span>
-              <input type="date" value="${periodEndValue}" readonly aria-label="Preset period end" />
-            </label>
-          </div>
-        `
-        : ""}
   `;
 }
 

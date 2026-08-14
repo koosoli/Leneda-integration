@@ -35,6 +35,10 @@
   --clr-export-muted:      rgba(88, 166, 255, 0.12);
   --clr-self:              #bc8cff;
   --clr-self-muted:        rgba(188, 140, 255, 0.12);
+  /* The energy community needs its own hue: it used to share --clr-primary
+     with grid export, so three different flows drew in one blue. */
+  --clr-community:         #bc8cff;
+  --clr-community-muted:   rgba(188, 140, 255, 0.12);
   --clr-gas:               #d29922;
   --clr-gas-muted:         rgba(210, 153, 34, 0.12);
   --clr-overlay:           rgba(22, 27, 34, 0.82);
@@ -130,6 +134,8 @@
   --clr-export-muted:      rgba(29, 111, 214, 0.12);
   --clr-self:              #7c4dff;
   --clr-self-muted:        rgba(124, 77, 255, 0.12);
+  --clr-community:         #7c4dff;
+  --clr-community-muted:   rgba(124, 77, 255, 0.12);
   --clr-gas:               #b7791f;
   --clr-gas-muted:         rgba(183, 121, 31, 0.12);
   --clr-overlay:           rgba(255, 255, 255, 0.88);
