@@ -81,6 +81,8 @@ export type AnalysisHeatmapMetric =
   | "exceedance_kwh"
   | "exceedance_frequency";
 export type AnalysisProfileMetric = "house" | "grid" | "solar";
+/** The Charts page is long enough that it needs its own sub-navigation. */
+export type AnalysisSection = "overview" | "patterns" | "solar" | "costs" | "peaks";
 
 export interface AnalysisComparisonData {
   key: string;
@@ -103,6 +105,7 @@ export interface AppState {
   chartUnit: "kw" | "kwh";
   chartTimeBucket: ChartTimeBucket;
   chartConsumptionView: "house" | "grid" | "solar_systems";
+  analysisSection: AnalysisSection;
   analysisHeatmapMetric: AnalysisHeatmapMetric;
   analysisProfileMetric: AnalysisProfileMetric;
   analysisComparisonMode: AnalysisComparisonMode;
@@ -247,6 +250,7 @@ export class LenedaApp {
     chartUnit: "kwh",
     chartTimeBucket: "quarter_hour",
     chartConsumptionView: "grid",
+    analysisSection: "overview",
     analysisHeatmapMetric: "grid",
     analysisProfileMetric: "house",
     analysisComparisonMode: "previous",
@@ -399,6 +403,18 @@ export class LenedaApp {
     };
   }
 
+  /**
+   * The comparison card costs four extra API calls, so only fetch it when the
+   * section that shows it is actually open.
+   */
+  private shouldLoadComparison(): boolean {
+    return (
+      this.state.tab === "charts" &&
+      this.state.analysisSection === "costs" &&
+      !!this.state.rangeData
+    );
+  }
+
   private resetAnalysisComparison(): void {
     this.state.analysisComparison = null;
     this.state.analysisComparisonLoading = false;
@@ -541,7 +557,7 @@ export class LenedaApp {
     } finally {
       this.state.loading = false;
       this.render();
-      if (this.state.tab === "charts" && this.state.rangeData) {
+      if (this.shouldLoadComparison()) {
         void this.loadAnalysisComparison();
       }
     }
@@ -589,7 +605,7 @@ export class LenedaApp {
     } finally {
       this.state.loading = false;
       this.render();
-      if (this.state.tab === "charts" && this.state.rangeData) {
+      if (this.shouldLoadComparison()) {
         void this.loadAnalysisComparison();
       }
     }
@@ -648,7 +664,7 @@ export class LenedaApp {
     } finally {
       this.state.loading = false;
       this.render();
-      if (this.state.tab === "charts" && this.state.rangeData) {
+      if (this.shouldLoadComparison()) {
         void this.loadAnalysisComparison();
       }
     }
@@ -672,7 +688,7 @@ export class LenedaApp {
     if ((tab === "dashboard" || tab === "charts") && !this.state.rangeData && !this.state.loading) {
       this.loadData();
     }
-    if (tab === "charts" && this.state.rangeData) {
+    if (this.shouldLoadComparison()) {
       void this.loadAnalysisComparison();
     }
     if (tab === "sensors" && !this.state.sensors) {
@@ -1008,6 +1024,22 @@ export class LenedaApp {
   }
 
   private attachAnalysisListeners(): void {
+    // Switching section is a navigation, not a tweak — start at the top of
+    // the new section rather than keeping the old scroll offset.
+    this.root.querySelectorAll("[data-analysis-section]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const section = (btn as HTMLElement).dataset.analysisSection as AnalysisSection;
+        if (section === this.state.analysisSection) return;
+        this.state.analysisSection = section;
+        this.render();
+        const main = this.root.querySelector(".main-content") as HTMLElement | null;
+        if (main) main.scrollTop = 0;
+        else window.scrollTo({ top: 0 });
+        // Costs holds the comparison card, whose data is fetched on demand.
+        if (this.shouldLoadComparison()) void this.loadAnalysisComparison();
+      });
+    });
+
     this.root.querySelectorAll("[data-analysis-heatmap]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const metric = (btn as HTMLElement).dataset.analysisHeatmap as AnalysisHeatmapMetric;
