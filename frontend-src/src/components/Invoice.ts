@@ -9,7 +9,7 @@
  * - Compensation fund, electricity tax, VAT
  */
 import type { AppState } from "./App";
-import { RANGES } from "./Dashboard";
+import { renderRangeControls } from "./RangeControls";
 import type {
   MeterMonthlyFee,
   DayGroup,
@@ -58,11 +58,6 @@ function parseDateOnly(value?: string): Date | null {
   return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
-function toDateInputValue(value?: string): string {
-  if (!value) return "";
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : "";
-}
 
 /**
  * Compute the number of days in the viewed period and a proration factor
@@ -360,8 +355,6 @@ export function renderInvoice(state: AppState): string {
   const usesReferenceWindows = referenceWindows.length > 0 && !!windowedUsage;
   const effectivePeakPower = windowedUsage ? windowedUsage.peakPowerKw : peakPower;
   const effectiveExceedanceKwh = windowedUsage ? windowedUsage.exceedanceKwh : exceedanceKwh;
-  const periodStartValue = toDateInputValue(d.start ?? state.customStart);
-  const periodEndValue = toDateInputValue(d.end ?? state.customEnd);
 
   // ── Period proration ──
   // Fixed monthly fees are scaled to the viewed period length.
@@ -772,63 +765,11 @@ export function renderInvoice(state: AppState): string {
         <p class="muted">Reference power level comparison requires 15-minute load-curve data for the selected period.</p>
       </div>
     `;
-  const rangeSelectorMarkup = `
-      <div class="range-selector">
-        ${RANGES.map((range) => `
-          <button
-            class="range-btn ${range.id === state.range ? "active" : ""}"
-            data-range="${range.id}"
-          >${range.label}</button>
-        `).join("")}
-      </div>
-    `;
-  const rangeInfoMarkup = d.start && d.end
-    ? (() => {
-      const start = new Date(d.start);
-      const end = new Date(d.end);
-      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
-      return `
-        <div class="range-info-bar">
-          Period: ${start.toLocaleDateString()} - ${end.toLocaleDateString()}
-        </div>
-      `;
-    })()
-    : "";
-  const rangePickerMarkup = state.range === "custom"
-    ? `
-      <div class="custom-range-picker">
-        <label>
-          <span>From</span>
-          <input type="date" id="custom-start" value="${state.customStart ?? ""}" />
-        </label>
-        <label>
-          <span>To</span>
-          <input type="date" id="custom-end" value="${state.customEnd ?? ""}" />
-        </label>
-        <button class="btn btn-primary" id="apply-custom-range">Apply</button>
-      </div>
-    `
-    : (periodStartValue && periodEndValue)
-      ? `
-        <div class="custom-range-picker period-preview">
-          <span class="period-preview-label">Viewed period</span>
-          <label>
-            <span>From</span>
-            <input type="date" value="${periodStartValue}" readonly aria-label="Preset period start" />
-          </label>
-          <label>
-            <span>To</span>
-            <input type="date" value="${periodEndValue}" readonly aria-label="Preset period end" />
-          </label>
-        </div>
-      `
-      : "";
+  const rangeControlsMarkup = renderRangeControls(state);
 
   return `
     <section class="invoice-view">
-      ${rangeSelectorMarkup}
-      ${rangeInfoMarkup}
-      ${rangePickerMarkup}
+      ${rangeControlsMarkup}
 
       <div class="section-header invoice-section-header">
         <div class="invoice-header-top">

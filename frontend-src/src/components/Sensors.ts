@@ -57,7 +57,7 @@ export function renderSensors(data: SensorsResponse | null): string {
               ${sensors
                 .map(
                   (s) => `
-                <tr>
+                <tr data-sensor-search="${`${getSensorDisplayName(s.key)} ${s.key}`.toLowerCase()}">
                   <td class="sensor-name">${getSensorDisplayName(s.key)}</td>
                   <td class="sensor-value" style="text-align: right; color: var(--clr-${colorClass});">${fmtNum(s.value)}</td>
                   <td class="sensor-unit">${s.unit}</td>
@@ -77,11 +77,19 @@ export function renderSensors(data: SensorsResponse | null): string {
     <section class="sensors-view">
       <div class="section-header">
         <h2>All Sensors</h2>
-        <div style="display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2);">
+        <div class="sensors-header-row">
           <span class="badge">${data.sensors.length} sensors</span>
           <span class="muted">${data.metering_point}</span>
+          <input
+            type="search"
+            id="sensor-filter"
+            class="sensor-filter"
+            placeholder="Filter sensors…"
+            aria-label="Filter sensors by name"
+          />
         </div>
       </div>
+      <p class="muted sensors-empty" id="sensors-no-match" hidden>No sensors match that filter.</p>
       ${renderGroup("Electricity Consumption", "⚡", electricity, "consumption")}
       ${renderGroup("Energy Production", "☀️", production, "production")}
       ${renderGroup("Energy Sharing", "🔗", sharing, "self")}

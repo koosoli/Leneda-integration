@@ -2,9 +2,10 @@ import type {
   AnalysisComparisonMode,
   AnalysisHeatmapMetric,
   AnalysisProfileMetric,
+  AnalysisSection,
   AppState,
 } from "./App";
-import { RANGES } from "./Dashboard";
+import { RANGES, renderRangeControls } from "./RangeControls";
 import type {
   BillingConfig,
   ConsumptionRateWindow,
@@ -22,6 +23,23 @@ import {
   selfUsePriorityLabel,
   type SolarAllocationResult,
 } from "../utils/solarAllocation";
+import {
+  annualise,
+  estimateBaseloadKw,
+  simulateBattery,
+  type BatteryInterval,
+} from "../utils/batterySim";
+
+const ANALYSIS_SECTIONS: Array<{ id: AnalysisSection; label: string; blurb: string }> = [
+  { id: "overview", label: "Overview", blurb: "Headline numbers and what stood out this period" },
+  { id: "patterns", label: "Patterns", blurb: "When you use energy, across the day and the week" },
+  { id: "solar", label: "Solar & Battery", blurb: "How much of your own solar you keep, and what storage would add" },
+  { id: "costs", label: "Costs", blurb: "What the period cost, and where the money moved" },
+  { id: "peaks", label: "Peaks", blurb: "Reference power, exceedance and the intervals that caused it" },
+];
+
+/** Battery sizes offered in the sizing table. */
+const BATTERY_SIZES_KWH = [5, 10, 15];
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HEATMAP_LABELS = {
@@ -156,12 +174,6 @@ interface LineSeries {
   color: string;
   values: number[];
   dashed?: boolean;
-}
-
-function toDateInputValue(value?: string): string {
-  if (!value) return "";
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : "";
 }
 
 function localDayKey(timestamp: number): string {
@@ -1106,58 +1118,6 @@ function renderProgressBars(
   `;
 }
 
-function renderRangeControls(state: AppState): string {
-  const periodStartValue = toDateInputValue(state.rangeData?.start ?? state.customStart);
-  const periodEndValue = toDateInputValue(state.rangeData?.end ?? state.customEnd);
-
-  return `
-    <div class="range-selector">
-      ${RANGES.map((range) => `
-        <button
-          class="range-btn ${range.id === state.range ? "active" : ""}"
-          data-range="${range.id}"
-        >${range.label}</button>
-      `).join("")}
-    </div>
-    ${state.rangeData?.start && state.rangeData?.end
-      ? `
-        <div class="range-info-bar">
-          Period: ${fmtDateLong(state.rangeData.start)} - ${fmtDateLong(state.rangeData.end)}
-        </div>
-      `
-      : ""}
-    ${state.range === "custom"
-      ? `
-        <div class="custom-range-picker">
-          <label>
-            <span>From</span>
-            <input type="date" id="custom-start" value="${state.customStart ?? ""}" />
-          </label>
-          <label>
-            <span>To</span>
-            <input type="date" id="custom-end" value="${state.customEnd ?? ""}" />
-          </label>
-          <button class="btn btn-primary" id="apply-custom-range">Apply</button>
-        </div>
-      `
-      : (periodStartValue && periodEndValue)
-        ? `
-          <div class="custom-range-picker period-preview">
-            <span class="period-preview-label">Viewed period</span>
-            <label>
-              <span>From</span>
-              <input type="date" value="${periodStartValue}" readonly aria-label="Preset period start" />
-            </label>
-            <label>
-              <span>To</span>
-              <input type="date" value="${periodEndValue}" readonly aria-label="Preset period end" />
-            </label>
-          </div>
-        `
-        : ""}
-  `;
-}
-
 function renderSummaryStats(
   analytics: AnalyticsBundle,
   currency: string,
@@ -1167,43 +1127,68 @@ function renderSummaryStats(
     ? `${fmtNum(official.totalSolarCoverageKwh)} kWh of ${fmtNum(official.consumptionKwh)} kWh usage covered, incl. ${fmtNum(official.communitySolarToHomeKwh)} kWh shared`
     : `${fmtNum(official.totalSolarCoverageKwh)} kWh of ${fmtNum(official.consumptionKwh)} kWh usage covered`;
 
+  // Sparklines only earn their place when there are several days to trend.
+  const trend = (values: number[], color: string): string =>
+    analytics.daily.length > 2 ? renderSparkline(values, color) : "";
+
+  const card = (options: {
+    label: string;
+    value: string;
+    meta: string;
+    spark?: string;
+  }): string => `
+      <div class="analysis-stat-card">
+        <span class="analysis-stat-label">${options.label}</span>
+        <strong class="analysis-stat-value">${options.value}</strong>
+        ${options.spark ?? ""}
+        <span class="analysis-stat-meta">${options.meta}</span>
+      </div>
+  `;
+
   return `
     <div class="analysis-stat-grid">
-      <div class="analysis-stat-card">
-        <span class="analysis-stat-label">Solar Coverage</span>
-        <strong class="analysis-stat-value">${fmtNum(official.coveragePct, 1)}%</strong>
-        <span class="analysis-stat-meta">${coverageMeta}</span>
-      </div>
-      <div class="analysis-stat-card">
-        <span class="analysis-stat-label">Self-Consumed Solar</span>
-        <strong class="analysis-stat-value">${fmtNum(official.selfConsumedPct, 1)}%</strong>
-        <span class="analysis-stat-meta">${fmtNum(official.directSolarToHomeKwh)} kWh kept from your own solar, ${fmtNum(official.exportedKwh)} kWh exported</span>
-      </div>
-      <div class="analysis-stat-card">
-        <span class="analysis-stat-label">Total Solar Value</span>
-        <strong class="analysis-stat-value">${formatCurrency(official.totalSolarValue, currency)}</strong>
-        <span class="analysis-stat-meta">Savings plus export revenue plus avoided exceedance charges</span>
-      </div>
-      <div class="analysis-stat-card">
-        <span class="analysis-stat-label">Self-Use vs Export</span>
-        <strong class="analysis-stat-value">${formatSignedCurrency(official.selfConsumptionAdvantage, currency)}</strong>
-        <span class="analysis-stat-meta">${fmtNum(official.directSolarToHomeKwh)} kWh kept on-site instead of exported</span>
-      </div>
-      <div class="analysis-stat-card">
-        <span class="analysis-stat-label">Peak Net Grid</span>
-        <strong class="analysis-stat-value">${fmtNum(analytics.totals.peakGridKw, 2)} kW</strong>
-        <span class="analysis-stat-meta">Compared with ${fmtNum(analytics.totals.peakHouseKw, 2)} kW gross house load</span>
-      </div>
-      <div class="analysis-stat-card">
-        <span class="analysis-stat-label">Exceedance Intervals</span>
-        <strong class="analysis-stat-value">${fmtNum(analytics.totals.exceedanceIntervals, 0)}</strong>
-        <span class="analysis-stat-meta">${fmtNum(analytics.totals.exceedanceKwh, 2)} kWh above the reference limit</span>
-      </div>
-      <div class="analysis-stat-card">
-        <span class="analysis-stat-label">Variable Import Cost</span>
-        <strong class="analysis-stat-value">${formatCurrency(official.variableImportCost, currency)}</strong>
-        <span class="analysis-stat-meta">${fmtNum(official.billedGridImportKwh)} kWh billed from the grid during the selected period</span>
-      </div>
+      ${card({
+    label: "Solar Coverage",
+    value: `${fmtNum(official.coveragePct, 1)}%`,
+    meta: coverageMeta,
+    spark: trend(analytics.daily.map((day) => day.coveragePct), "var(--clr-production)"),
+  })}
+      ${card({
+    label: "Self-Consumed Solar",
+    value: `${fmtNum(official.selfConsumedPct, 1)}%`,
+    meta: `${fmtNum(official.directSolarToHomeKwh)} kWh kept from your own solar, ${fmtNum(official.exportedKwh)} kWh exported`,
+    spark: trend(analytics.daily.map((day) => day.selfConsumedPct), "var(--clr-production)"),
+  })}
+      ${card({
+    label: "Total Solar Value",
+    value: formatCurrency(official.totalSolarValue, currency),
+    meta: "Savings plus export revenue plus avoided exceedance charges",
+    spark: trend(analytics.daily.map((day) => day.solarValue), "var(--clr-production)"),
+  })}
+      ${card({
+    label: "Self-Use vs Export",
+    value: formatSignedCurrency(official.selfConsumptionAdvantage, currency),
+    meta: `${fmtNum(official.directSolarToHomeKwh)} kWh kept on-site instead of exported`,
+    spark: trend(analytics.daily.map((day) => day.selfConsumptionAdvantage), "var(--clr-self)"),
+  })}
+      ${card({
+    label: "Peak Net Grid",
+    value: `${fmtNum(analytics.totals.peakGridKw, 2)} kW`,
+    meta: `Compared with ${fmtNum(analytics.totals.peakHouseKw, 2)} kW gross house load`,
+    spark: trend(analytics.daily.map((day) => day.peakGridKw), "var(--clr-consumption)"),
+  })}
+      ${card({
+    label: "Exceedance Intervals",
+    value: fmtNum(analytics.totals.exceedanceIntervals, 0),
+    meta: `${fmtNum(analytics.totals.exceedanceKwh, 2)} kWh above the reference limit`,
+    spark: trend(analytics.daily.map((day) => day.exceedanceIntervals), "var(--clr-warning)"),
+  })}
+      ${card({
+    label: "Variable Import Cost",
+    value: formatCurrency(official.variableImportCost, currency),
+    meta: `${fmtNum(official.billedGridImportKwh)} kWh billed from the grid during the selected period`,
+    spark: trend(analytics.daily.map((day) => day.importCost), "var(--clr-consumption)"),
+  })}
     </div>
   `;
 }
@@ -1855,6 +1840,312 @@ function renderLoadDurationCard(analytics: AnalyticsBundle, referencePowerKw: nu
   `;
 }
 
+/**
+ * A bare trend line for a stat card — no axes, no labels, just the shape of
+ * the series. Returns "" for series too short to have a shape.
+ */
+function renderSparkline(values: number[], color: string): string {
+  const usable = values.filter((v) => Number.isFinite(v));
+  if (usable.length < 2) return "";
+
+  const width = 100;
+  const height = 26;
+  const min = Math.min(...usable);
+  const max = Math.max(...usable);
+  const span = max - min || 1;
+  const step = width / (usable.length - 1);
+
+  const points = usable.map((value, i) => {
+    const x = i * step;
+    const y = height - ((value - min) / span) * (height - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const last = points[points.length - 1].split(",");
+
+  return `
+    <svg class="stat-sparkline" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points="${points.join(" ")}" fill="none" stroke="${color}" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+      <circle cx="${last[0]}" cy="${last[1]}" r="2" fill="${color}" vector-effect="non-scaling-stroke" />
+    </svg>
+  `;
+}
+
+interface Insight {
+  tone: "good" | "warn" | "info";
+  title: string;
+  body: string;
+}
+
+/**
+ * Turns the analytics bundle into a handful of plain-language findings.
+ *
+ * Every claim here is read straight off the measured period — nothing is
+ * extrapolated except where the text says so.
+ */
+function buildInsights(
+  analytics: AnalyticsBundle,
+  official: OfficialSummaryStats,
+  currency: string,
+  baseloadKw: number,
+  bestBattery: ReturnType<typeof simulateBattery> | null,
+  days: number,
+): Insight[] {
+  const insights: Insight[] = [];
+  const { totals, daily, hourlyOpportunity } = analytics;
+
+  // Where the money actually went.
+  const costliestDay = daily.reduce<DailyBucket | null>(
+    (worst, day) => (!worst || day.importCost > worst.importCost ? day : worst),
+    null,
+  );
+  if (costliestDay && costliestDay.importCost > 0 && daily.length > 1) {
+    const share = totals.importCost > 0 ? (costliestDay.importCost / totals.importCost) * 100 : 0;
+    insights.push({
+      tone: "info",
+      title: "Most expensive day",
+      body: `${costliestDay.fullDate} cost ${formatCurrency(costliestDay.importCost, currency)} in grid energy — ${fmtNum(share, 0)}% of the period's total, on ${fmtNum(costliestDay.gridKwh)} kWh imported.`,
+    });
+  }
+
+  // Always-on load is the number people never see and can usually act on.
+  if (baseloadKw > 0.01) {
+    const baseloadDailyKwh = baseloadKw * 24;
+    const shareOfUse = totals.houseKwh > 0 ? ((baseloadDailyKwh * days) / totals.houseKwh) * 100 : 0;
+    const annualCost = annualise(baseloadDailyKwh * days * (totals.importCost / Math.max(totals.gridKwh, 0.001)), days);
+    insights.push({
+      tone: shareOfUse > 50 ? "warn" : "info",
+      title: "Always-on baseload",
+      body: `Your load never drops below ${fmtNum(baseloadKw, 2)} kW — about ${fmtNum(baseloadDailyKwh)} kWh a day, ${fmtNum(shareOfUse, 0)}% of everything you used. Priced at this period's average import rate, that standing load is roughly ${formatCurrency(annualCost, currency)} a year if all of it came from the grid.`,
+    });
+  }
+
+  // Exceedance is the charge people are most surprised by.
+  if (totals.exceedanceIntervals > 0) {
+    const worstHour = analytics.hourlyExceedanceKwh.indexOf(Math.max(...analytics.hourlyExceedanceKwh));
+    insights.push({
+      tone: "warn",
+      title: "Reference power exceeded",
+      body: `${fmtNum(totals.exceedanceIntervals, 0)} interval${totals.exceedanceIntervals === 1 ? "" : "s"} went over your reference limit, costing ${formatCurrency(totals.exceedanceCost, currency)}. Most of it happened around ${String(worstHour).padStart(2, "0")}:00.`,
+    });
+  } else if (totals.peakGridKw > 0) {
+    insights.push({
+      tone: "good",
+      title: "Stayed under the reference limit",
+      body: `Your highest net grid draw was ${fmtNum(totals.peakGridKw, 2)} kW and never crossed the reference power, so no exceedance charge applied.`,
+    });
+  }
+
+  // Solar kept vs solar given away.
+  if (official.exportedKwh > 0.5) {
+    insights.push({
+      tone: official.selfConsumedPct >= 50 ? "good" : "info",
+      title: "Solar kept at home",
+      body: `You used ${fmtNum(official.selfConsumedPct, 0)}% of your own production on site and exported ${fmtNum(official.exportedKwh)} kWh. Each kWh kept was worth ${formatCurrency(official.selfConsumptionAdvantage / Math.max(official.directSolarToHomeKwh, 0.001), currency)} more than exporting it.`,
+    });
+  }
+
+  // The one hour most worth shifting load away from.
+  const worstHour = hourlyOpportunity.reduce<HourOpportunityBucket | null>(
+    (worst, hour) => (!worst || hour.importCost > worst.importCost ? hour : worst),
+    null,
+  );
+  if (worstHour && worstHour.importCost > 0) {
+    insights.push({
+      tone: "info",
+      title: "Costliest hour of the day",
+      body: `${worstHour.label} accounted for ${formatCurrency(worstHour.importCost, currency)} of grid spend across the period, on ${fmtNum(worstHour.gridKwh)} kWh. Moving flexible loads out of that hour is the single biggest lever here.`,
+    });
+  }
+
+  // Storage, but only when there was genuinely surplus to store. Stated as a
+  // measured number, not a recommendation — it is before the cost of the
+  // battery, and a high feed-in tariff can make the margin very thin.
+  if (bestBattery && bestBattery.netBenefit > 0) {
+    const perYear = annualise(bestBattery.netBenefit, days);
+    insights.push({
+      tone: "info",
+      title: "What storage would have added",
+      body: `A ${fmtNum(bestBattery.capacityKwh, 0)} kWh battery would have covered ${fmtNum(bestBattery.gridImportCoveredPct, 0)}% of your grid import, worth ${formatCurrency(bestBattery.netBenefit, currency)} over this period once the lost feed-in revenue is deducted — roughly ${formatCurrency(perYear, currency)} a year if the rest of the year looks like this one, before the cost of the battery itself.`,
+    });
+  }
+
+  return insights;
+}
+
+function renderInsightsCard(insights: Insight[]): string {
+  if (insights.length === 0) return "";
+
+  const icon = (tone: Insight["tone"]): string => {
+    if (tone === "good") {
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 12.5L11 15L15.5 9.5" /></svg>`;
+    }
+    if (tone === "warn") {
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4L20.5 19H3.5L12 4Z" /><path d="M12 10V14" /><path d="M12 16.5H12.01" /></svg>`;
+    }
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 11V16" /><path d="M12 7.5H12.01" /></svg>`;
+  };
+
+  return `
+    <div class="card analysis-card analysis-card-full insights-card">
+      <div class="analysis-card-header">
+        <div>
+          <h3 class="card-title">What stood out</h3>
+          <p class="analysis-card-copy">Read straight from this period's 15-minute data and your billing settings.</p>
+        </div>
+      </div>
+      <div class="insight-list">
+        ${insights.map((insight) => `
+          <div class="insight insight-${insight.tone}">
+            <span class="insight-icon" aria-hidden="true">${icon(insight.tone)}</span>
+            <span class="insight-copy">
+              <strong>${insight.title}</strong>
+              <span>${insight.body}</span>
+            </span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderBatteryCard(
+  results: ReturnType<typeof simulateBattery>[],
+  currency: string,
+  days: number,
+  exportedKwh: number,
+): string {
+  if (exportedKwh <= 0.5) {
+    return `
+      <div class="card analysis-card">
+        <div class="analysis-card-header">
+          <div>
+            <h3 class="card-title">Battery Sizing</h3>
+            <p class="analysis-card-copy">Nothing was exported in this period, so there was no surplus a battery could have stored.</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  const best = results.reduce((a, b) => (b.netBenefit > a.netBenefit ? b : a));
+
+  return `
+    <div class="card analysis-card">
+      <div class="analysis-card-header">
+        <div>
+          <h3 class="card-title">Battery Sizing</h3>
+          <p class="analysis-card-copy">
+            Your measured intervals replayed against a battery: surplus that was actually exported charges it, and energy you actually imported is served from it first.
+          </p>
+        </div>
+      </div>
+
+      <div class="analysis-table-wrap">
+        <table class="analysis-table battery-table">
+          <thead>
+            <tr>
+              <th>Size</th>
+              <th class="numeric">Grid import covered</th>
+              <th class="numeric">Cycles</th>
+              <th class="numeric">Net value</th>
+              <th class="numeric">Per year</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${results.map((result) => `
+              <tr class="${result.capacityKwh === best.capacityKwh ? "battery-row-best" : ""}">
+                <td><strong>${fmtNum(result.capacityKwh, 0)} kWh</strong></td>
+                <td class="numeric">
+                  ${fmtNum(result.gridImportCoveredPct, 0)}%
+                  <span class="battery-bar"><span style="width:${clamp(result.gridImportCoveredPct, 0, 100)}%"></span></span>
+                </td>
+                <td class="numeric">${fmtNum(result.equivalentCycles, 1)}</td>
+                <td class="numeric">${formatCurrency(result.netBenefit, currency)}</td>
+                <td class="numeric">${formatCurrency(annualise(result.netBenefit, days), currency)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+
+      <p class="analysis-note">
+        Net value is the avoided grid import minus the feed-in revenue given up by storing instead of exporting.
+        This is a floor, not a sales figure: it models round-trip losses and 90% usable capacity only — no inverter
+        power limit, no degradation, and no tariff arbitrage. "Per year" simply scales ${fmtNum(days, 0)} day${days === 1 ? "" : "s"}
+        of measured data to 365 and assumes the rest of the year looks like this one.
+      </p>
+    </div>
+  `;
+}
+
+function renderBaseloadCard(
+  baseloadKw: number,
+  analytics: AnalyticsBundle,
+  currency: string,
+  days: number,
+): string {
+  const dailyKwh = baseloadKw * 24;
+  const periodKwh = dailyKwh * days;
+  const shareOfUse = analytics.totals.houseKwh > 0 ? (periodKwh / analytics.totals.houseKwh) * 100 : 0;
+  const avgRate = analytics.totals.gridKwh > 0 ? analytics.totals.importCost / analytics.totals.gridKwh : 0;
+
+  return `
+    <div class="card analysis-card">
+      <div class="analysis-card-header">
+        <div>
+          <h3 class="card-title">Always-On Baseload</h3>
+          <p class="analysis-card-copy">
+            The floor your house load never drops below — fridges, standby, network gear, circulation pumps.
+          </p>
+        </div>
+      </div>
+
+      <div class="baseload-figures">
+        <div class="baseload-figure">
+          <span class="analysis-stat-label">Baseload</span>
+          <strong class="analysis-stat-value">${fmtNum(baseloadKw, 2)} kW</strong>
+          <span class="analysis-stat-meta">5th percentile of all intervals</span>
+        </div>
+        <div class="baseload-figure">
+          <span class="analysis-stat-label">Per day</span>
+          <strong class="analysis-stat-value">${fmtNum(dailyKwh)} kWh</strong>
+          <span class="analysis-stat-meta">${fmtNum(shareOfUse, 0)}% of everything you used</span>
+        </div>
+        <div class="baseload-figure">
+          <span class="analysis-stat-label">Per year</span>
+          <strong class="analysis-stat-value">${formatCurrency(dailyKwh * 365 * avgRate, currency)}</strong>
+          <span class="analysis-stat-meta">If all of it came from the grid, at this period's average rate</span>
+        </div>
+      </div>
+
+      <div class="baseload-bar" role="img" aria-label="${fmtNum(shareOfUse, 0)} percent of usage is baseload">
+        <span class="baseload-bar-fill" style="width:${clamp(shareOfUse, 0, 100)}%"></span>
+      </div>
+      <p class="analysis-note">
+        Cutting the baseload pays back every hour of every day, so it is usually the cheapest saving available.
+        A 100 W reduction here is worth about ${formatCurrency(0.1 * 24 * 365 * avgRate, currency)} a year.
+      </p>
+    </div>
+  `;
+}
+
+function renderSectionNav(active: AnalysisSection): string {
+  return `
+    <div class="analysis-section-nav" role="tablist" aria-label="Analysis sections">
+      ${ANALYSIS_SECTIONS.map((section) => `
+        <button
+          class="analysis-section-btn ${section.id === active ? "active" : ""}"
+          data-analysis-section="${section.id}"
+          role="tab"
+          aria-selected="${section.id === active}"
+          title="${section.blurb}"
+        >${section.label}</button>
+      `).join("")}
+    </div>
+  `;
+}
+
 export function renderAnalysis(state: AppState): string {
   const config = state.config;
   const rangeData = state.rangeData;
@@ -1944,13 +2235,93 @@ export function renderAnalysis(state: AppState): string {
     variableImportCost: billedGridImportKwh * importRateWithVat,
   };
 
+  const days = Math.max(1, analytics.daily.length);
+  const baseloadKw = estimateBaseloadKw(analytics.points.map((point) => point.houseKw));
+
+  // Interval energy for the battery replay. The measured export and import are
+  // the only inputs, so the simulation can never invent surplus that was not there.
+  const intervalHours = analytics.points.length > 1
+    ? Math.max(
+      0.0001,
+      (analytics.points[1].timestamp - analytics.points[0].timestamp) / 3_600_000,
+    )
+    : 0.25;
+  const batteryIntervals: BatteryInterval[] = analytics.points.map((point) => ({
+    exportKwh: point.exportKw * intervalHours,
+    gridKwh: point.gridKw * intervalHours,
+    importRate: point.importRateWithVat,
+    feedInRate: point.feedInRate,
+  }));
+  const batteryResults = BATTERY_SIZES_KWH.map((size) => simulateBattery(batteryIntervals, size));
+  const bestBattery = batteryResults.length > 0
+    ? batteryResults.reduce((a, b) => (b.netBenefit > a.netBenefit ? b : a))
+    : null;
+
+  const insights = buildInsights(
+    analytics,
+    officialSummary,
+    currency,
+    baseloadKw,
+    bestBattery && bestBattery.netBenefit > 0 ? bestBattery : null,
+    days,
+  );
+
+  const section = state.analysisSection;
+  const activeSection = ANALYSIS_SECTIONS.find((s) => s.id === section) ?? ANALYSIS_SECTIONS[0];
+
+  let sectionContent = "";
+  switch (section) {
+    case "overview":
+      sectionContent = `
+        ${renderInsightsCard(insights)}
+        ${renderSummaryStats(analytics, currency, officialSummary)}
+        ${renderDailyBreakdownCard(analytics)}
+      `;
+      break;
+    case "patterns":
+      sectionContent = `
+        <div class="analysis-grid">
+          ${renderIntradayProfileCard(state, analytics)}
+          ${renderHeatmapCard(state, analytics)}
+        </div>
+        <div class="analysis-grid">
+          ${renderBaseloadCard(baseloadKw, analytics, currency, days)}
+          ${renderLoadDurationCard(analytics, config.reference_power_kw ?? 0)}
+        </div>
+      `;
+      break;
+    case "solar":
+      sectionContent = `
+        <div class="analysis-grid">
+          ${renderSolarCoverageCard(analytics, currency, prioritySolarAllocation, importRateWithVat)}
+          ${renderBatteryCard(batteryResults, currency, days, officialSummary.exportedKwh)}
+        </div>
+      `;
+      break;
+    case "costs":
+      sectionContent = `
+        <div class="analysis-grid">
+          ${renderCostCard(analytics, currency)}
+          ${renderTariffOpportunityCard(analytics, currency)}
+        </div>
+        ${renderComparisonCard(analytics, state, config)}
+      `;
+      break;
+    case "peaks":
+      sectionContent = `
+        ${renderReferenceCard(analytics, currency)}
+        ${renderPeakAnatomyCard(analytics)}
+      `;
+      break;
+  }
+
   return `
     <section class="analysis-view">
       <div class="section-header analysis-section-header">
         <div>
           <span class="badge">Analysis</span>
           <h2>Charts and Optimization</h2>
-          <p class="muted">Deeper electricity analysis for ${rangeLabel(state)}. This page is built from the same 15-minute data and billing settings that drive the dashboard and invoice.</p>
+          <p class="muted">${activeSection.blurb} — ${rangeLabel(state)}.</p>
         </div>
         <div class="analysis-header-meta">
           <span>${rangeSubtitle(state)}</span>
@@ -1959,30 +2330,9 @@ export function renderAnalysis(state: AppState): string {
       </div>
 
       ${renderRangeControls(state)}
-      ${renderSummaryStats(analytics, currency, officialSummary)}
-      ${renderDailyBreakdownCard(analytics)}
+      ${renderSectionNav(section)}
 
-      <div class="analysis-grid">
-        ${renderIntradayProfileCard(state, analytics)}
-        ${renderHeatmapCard(state, analytics)}
-      </div>
-
-      <div class="analysis-grid">
-        ${renderSolarCoverageCard(analytics, currency, prioritySolarAllocation, importRateWithVat)}
-        ${renderTariffOpportunityCard(analytics, currency)}
-      </div>
-
-      <div class="analysis-grid">
-        ${renderReferenceCard(analytics, currency)}
-        ${renderComparisonCard(analytics, state, config)}
-      </div>
-
-      <div class="analysis-grid">
-        ${renderCostCard(analytics, currency)}
-        ${renderLoadDurationCard(analytics, config.reference_power_kw ?? 0)}
-      </div>
-
-      ${renderPeakAnatomyCard(analytics)}
+      ${sectionContent}
     </section>
   `;
 }

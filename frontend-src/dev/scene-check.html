@@ -1,0 +1,168 @@
+<!doctype html>
+<!--
+  Geometry harness for the energy-flow scene. Renders every variant
+  (desktop/mobile × gas/no-gas) and reports overlapping elements, so the
+  layout can be checked without a gas meter in the dev credentials.
+  Open http://localhost:5175/dev/scene-check.html while `npm run dev` runs.
+-->
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <title>Energy flow scene — geometry check</title>
+  <link rel="stylesheet" href="/src/styles/variables.css" />
+  <link rel="stylesheet" href="/src/styles/layout.css" />
+  <link rel="stylesheet" href="/src/styles/components.css" />
+  <style>
+    body {
+      background: var(--clr-bg);
+      color: var(--clr-text);
+      font-family: var(--font-sans);
+      margin: 0;
+      padding: 24px;
+    }
+
+    .case {
+      margin-bottom: 32px;
+    }
+
+    .case h2 {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--clr-muted);
+    }
+
+    .desktop-box {
+      width: 900px;
+      max-width: 100%;
+    }
+
+    .mobile-box {
+      width: 380px;
+    }
+
+    /* The harness shows both variants at once. */
+    .elite-scene-mobile {
+      display: block !important;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="out"></div>
+  <script type="module">
+    import { renderEnergyFlowScene } from "/src/components/EnergyFlowScene.ts";
+
+    const base = {
+      production: 144.07, directSolarToHome: 11.93, solarToHome: 11.93,
+      boughtFromGrid: 5.69, soldToMarket: 132.14, shared: 0, sharedWithMe: 11.93,
+      communityExchange: 11.93, totalHomeEnergy: 17.61, selfSufficiency: 67.7,
+      gasEnergy: 0, gasVolume: 0, hasGas: false,
+    };
+    const withGas = { ...base, gasEnergy: 812.4, gasVolume: 74.6, hasGas: true };
+    // A second dataset where every flow is large, to check text lengths.
+    const big = {
+      production: 12345.6, directSolarToHome: 9876.5, solarToHome: 9876.5,
+      boughtFromGrid: 8765.4, soldToMarket: 7654.3, shared: 6543.2, sharedWithMe: 5432.1,
+      communityExchange: 11975.3, totalHomeEnergy: 18642.9, selfSufficiency: 52.9,
+      gasEnergy: 24680.1, gasVolume: 2345.6, hasGas: true,
+    };
+
+    const cases = [
+      ["desktop / no gas", base, "desktop"],
+      ["desktop / gas", withGas, "desktop"],
+      ["desktop / gas / large numbers", big, "desktop"],
+      ["mobile / no gas", base, "mobile"],
+      ["mobile / gas", withGas, "mobile"],
+    ];
+
+    const out = document.getElementById("out");
+    for (const [name, data, variant] of cases) {
+      const wrap = document.createElement("div");
+      wrap.className = "case";
+      wrap.innerHTML = `<h2>${name}</h2><div class="${variant}-box" data-case="${name}">${renderEnergyFlowScene(data, variant)}</div>`;
+      out.appendChild(wrap);
+    }
+
+    // ── Overlap report ──
+    window.sceneReport = () => {
+      const report = [];
+      document.querySelectorAll("[data-case]").forEach((box) => {
+        const svg = box.querySelector("svg");
+        const vb = svg.viewBox.baseVal;
+        const r = svg.getBoundingClientRect();
+        const sx = vb.width / r.width;
+        const sy = vb.height / r.height;
+        const toVB = (el) => {
+          const b = el.getBoundingClientRect();
+          return {
+            x: (b.x - r.x) * sx, y: (b.y - r.y) * sy,
+            w: b.width * sx, h: b.height * sy,
+          };
+        };
+        const parts = [];
+        // The badge plate, not the whole badge group: the aura discs around
+        // it are decorative bleed and are meant to overlap their neighbours.
+        svg.querySelectorAll(".scene-node-plate, .scene-node-text, .elite-house, .flow-link").forEach((el) => {
+          const cls = (el.getAttribute("class") || "").split(" ")[0];
+          const label = el.querySelector("title")?.textContent
+            || el.parentElement?.querySelector(".scene-node-kicker")?.textContent
+            || el.querySelector(".scene-node-kicker")?.textContent
+            || cls;
+          parts.push({ name: `${cls}:${label}`, box: toVB(el), el });
+        });
+        const hits = [];
+        for (let i = 0; i < parts.length; i++) {
+          for (let j = i + 1; j < parts.length; j++) {
+            const a = parts[i].box, b = parts[j].box;
+            // Links legitimately touch the nodes they connect; only compare solids.
+            if (parts[i].name.startsWith("flow-link") || parts[j].name.startsWith("flow-link")) continue;
+            const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+            const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+            if (ox > 1 && oy > 1) {
+              hits.push({ a: parts[i].name, b: parts[j].name, ox: Math.round(ox), oy: Math.round(oy) });
+            }
+          }
+        }
+        // Anything sticking out of the viewBox?
+        const spill = parts
+          .filter((p) => p.box.x < 0 || p.box.y < 0 || p.box.x + p.box.w > vb.width + 1 || p.box.y + p.box.h > vb.height + 1)
+          .map((p) => ({
+            name: p.name,
+            box: [Math.round(p.box.x), Math.round(p.box.y), Math.round(p.box.w), Math.round(p.box.h)],
+          }));
+        // The roof panel band is a rotated group, so a bounding box says
+        // nothing useful — test its four real corners against the roof
+        // triangle instead.
+        const panels = svg.querySelector(".house-panels");
+        const rect = panels.querySelector("rect");
+        const m = panels.transform.baseVal.consolidate().matrix;
+        const map = (px, py) => ({ x: m.a * px + m.c * py + m.e, y: m.b * px + m.d * py + m.f });
+        const rx = parseFloat(rect.getAttribute("x"));
+        const ry = parseFloat(rect.getAttribute("y"));
+        const rw = parseFloat(rect.getAttribute("width"));
+        const rh = parseFloat(rect.getAttribute("height"));
+        const corners = [map(rx, ry), map(rx + rw, ry), map(rx + rw, ry + rh), map(rx, ry + rh)];
+        const n = svg.querySelector(".house-roof").getAttribute("d").match(/-?\d+(\.\d+)?/g).map(Number);
+        const tri = [{ x: n[0], y: n[1] }, { x: n[2], y: n[3] }, { x: n[4], y: n[5] }];
+        const side = (p, a, b) => (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
+        const inTriangle = (p) => {
+          const d1 = side(p, tri[0], tri[1]), d2 = side(p, tri[1], tri[2]), d3 = side(p, tri[2], tri[0]);
+          return !(((d1 < 0) || (d2 < 0) || (d3 < 0)) && ((d1 > 0) || (d2 > 0) || (d3 > 0)));
+        };
+
+        report.push({
+          case: box.dataset.case,
+          viewBox: [vb.width, vb.height],
+          overlaps: hits,
+          spill,
+          panelsInsideRoof: corners.every(inTriangle),
+        });
+      });
+      return report;
+    };
+  </script>
+</body>
+
+</html>
