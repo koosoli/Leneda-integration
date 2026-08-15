@@ -3,7 +3,7 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
-## [Unreleased]
+## [v2.18.0] - 2026-08-15
 
 ### New Features
 - **Charts Page Sections:** The analysis page was one 5,200px scroll of ten cards with no way to navigate it. It is now five sections — Overview, Patterns, Solar & Battery, Costs, Peaks — each one or two screens, with the range picker shared across them.
