@@ -383,8 +383,44 @@ export function renderInvoice(state: AppState): string {
   // 3b. Per-meter monthly fees (extra metering points)
   const meterFees: MeterMonthlyFee[] = config.meter_monthly_fees ?? [];
 
+  // ── Government aid & dated billing adjustments ──
+  // Subtracted as net amounts before VAT so the final gross reduction matches
+  // the official per-unit rate exactly (e.g. 0.04 EUR/kWh incl. VAT).
+  // Computed before the invoice lines because a suspending adjustment (the
+  // official electricity subsidy, billed by suppliers *through* the
+  // compensation line) replaces the base compensation credit on the same kWh
+  // instead of stacking both.
+  const billingAdjustments = computeBillingAdjustments({
+    adjustments: config.billing_adjustments,
+    vatRate: config.vat_rate,
+    gasVatRate: config.gas_vat_rate ?? 0.08,
+    periodStart: periodStartIso,
+    periodEnd: periodEndIso,
+    consumptionItems: state.consumptionTimeseries?.items ?? null,
+    productionItems: state.productionTimeseries?.items ?? null,
+    fallbackGridImportKwh: billedConsumption,
+    fallbackSelfConsumedKwh: totalSolarToHome,
+    gasVolumeM3: gasVolume,
+    gasEnergyKwh: gasEnergy,
+  });
+  const electricityAdjustmentLines = billingAdjustments.electricity.lines;
+  const gasAdjustmentLines = billingAdjustments.gas.lines;
+  const hasElectricityAdjustments = electricityAdjustmentLines.some((line) => line.applied && Math.abs(line.total_gross) > 1e-9);
+  const hasGasAdjustments = gasAdjustmentLines.some((line) => line.applied && Math.abs(line.total_gross) > 1e-9);
+  const electricityAdjustmentsNet = billingAdjustments.electricity.applied_net;
+  const gasAdjustmentsNet = billingAdjustments.gas.applied_net;
+  const adjustmentsEstimated = billingAdjustments.estimated;
+  const suspendedGridKwh = Math.min(
+    billedConsumption,
+    Math.max(0, billingAdjustments.electricity.suspended_grid_kwh ?? 0),
+  );
+  const suspendedSelfKwh = Math.min(
+    totalSolarToHome,
+    Math.max(0, billingAdjustments.electricity.suspended_self_kwh ?? 0),
+  );
+
   // 4. Taxes & levies
-  const compensationCredit = billedConsumption * config.compensation_fund_rate;
+  const compensationCredit = (billedConsumption - suspendedGridKwh) * config.compensation_fund_rate;
   const electricityTax = billedConsumption * config.electricity_tax_rate;
   const domiciliationDiscount = Math.max(0, config.domiciliation_discount ?? 0) * proFactor;
   const connectDiscount = Math.max(0, config.connect_discount ?? 0) * proFactor;
@@ -413,30 +449,6 @@ export function renderInvoice(state: AppState): string {
   const subtotalCosts = roundCents(
     invoiceLines.reduce((sum, amount) => sum + roundCents(amount), 0),
   );
-
-  // ── Government aid & dated billing adjustments ──
-  // Subtracted as net amounts before VAT so the final gross reduction matches
-  // the official per-unit rate exactly (e.g. 0.04 EUR/kWh incl. VAT).
-  const billingAdjustments = computeBillingAdjustments({
-    adjustments: config.billing_adjustments,
-    vatRate: config.vat_rate,
-    gasVatRate: config.gas_vat_rate ?? 0.08,
-    periodStart: periodStartIso,
-    periodEnd: periodEndIso,
-    consumptionItems: state.consumptionTimeseries?.items ?? null,
-    productionItems: state.productionTimeseries?.items ?? null,
-    fallbackGridImportKwh: billedConsumption,
-    fallbackSelfConsumedKwh: totalSolarToHome,
-    gasVolumeM3: gasVolume,
-    gasEnergyKwh: gasEnergy,
-  });
-  const electricityAdjustmentLines = billingAdjustments.electricity.lines;
-  const gasAdjustmentLines = billingAdjustments.gas.lines;
-  const hasElectricityAdjustments = electricityAdjustmentLines.some((line) => line.applied && Math.abs(line.total_gross) > 1e-9);
-  const hasGasAdjustments = gasAdjustmentLines.some((line) => line.applied && Math.abs(line.total_gross) > 1e-9);
-  const electricityAdjustmentsNet = billingAdjustments.electricity.applied_net;
-  const gasAdjustmentsNet = billingAdjustments.gas.applied_net;
-  const adjustmentsEstimated = billingAdjustments.estimated;
 
   // Adjustments are their own invoice line, so they are rounded like one, and
   // VAT is charged on the rounded subtotal exactly as the supplier does.
@@ -500,8 +512,12 @@ export function renderInvoice(state: AppState): string {
   // During a subsidy period a self-consumed solar kWh avoids a grid import
   // that would itself have received the subsidy, so its value is lower by
   // the applicable gross subsidy per kWh (timestamp-aware in the engine).
+  // Where the subsidy suspends the base compensation credit, the avoided
+  // base compensation value is removed as well.
   const solarSubsidyCorrection = billingAdjustments.electricity.solar_correction_gross;
-  const totalSelfConsumedSavings = selfConsumedSavings + selfConsumedSavingsVat - solarSubsidyCorrection;
+  const suspendedCompensationCorrection =
+    suspendedSelfKwh * config.compensation_fund_rate * (1 + config.vat_rate);
+  const totalSelfConsumedSavings = selfConsumedSavings + selfConsumedSavingsVat - solarSubsidyCorrection - suspendedCompensationCorrection;
   const selfConsumptionExportEquivalent = prioritySolarAllocation
     ? prioritySolarAllocation.totalSelfUseExportEquivalent
     : selfConsumed * avgFeedInRate;
@@ -843,7 +859,7 @@ export function renderInvoice(state: AppState): string {
 
             <tr class="section-label"><td colspan="3">Taxes & Levies</td></tr>
             <tr>
-              <td>Compensation Fund</td>
+              <td>Compensation Fund${suspendedGridKwh > 1e-9 ? `<br/><span class="muted" style="font-size: var(--text-xs);">Base credit suspended on ${fmtKwh(suspendedGridKwh)} kWh covered by the subsidy (supplier bills it through this line)</span>` : ""}</td>
               <td style="text-align: right;">${fmtNum(config.compensation_fund_rate, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(compensationCredit)}</td>
             </tr>

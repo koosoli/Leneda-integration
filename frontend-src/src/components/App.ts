@@ -34,7 +34,7 @@ import {
   isChartTimeBucketEnabled,
   type ChartTimeBucket,
 } from "../utils/chartTime";
-import { defaultAdjustments } from "../utils/billingAdjustments";
+import { defaultAdjustments, LU_ELECTRICITY_PRESET_ID } from "../utils/billingAdjustments";
 
 // ── localStorage credential helpers (persist across reloads, never in git) ──
 
@@ -1255,6 +1255,7 @@ export class LenedaApp {
         const endDate = fd.get(`adjustment_${i}_end_date`) as string | null;
         const presetId = fd.get(`adjustment_${i}_preset_id`) as string | null;
         const note = fd.get(`adjustment_${i}_eligibility_note`) as string | null;
+        const suspendsRaw = fd.get(`adjustment_${i}_suspends_compensation`) as string | null;
         adjustments.push({
           id: (id ?? "").trim() || `custom-${i + 1}`,
           label: (label ?? "").trim() || `Adjustment ${i + 1}`,
@@ -1269,6 +1270,10 @@ export class LenedaApp {
           eligibility_note: (note ?? "").trim(),
           tariff_already_includes_adjustment:
             (form.querySelector(`[name="adjustment_${i}_tariff_already_includes_adjustment"]`) as HTMLInputElement)?.checked ?? false,
+          suspends_compensation:
+            suspendsRaw !== null
+              ? suspendsRaw === "1"
+              : (presetId ?? "").trim() === LU_ELECTRICITY_PRESET_ID,
         });
       }
       return adjustments;

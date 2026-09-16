@@ -180,3 +180,94 @@ class TestRoundingIsAppliedPerLine:
         """0.005 + 0.005 bills as 0.02 (two rounded lines), never 0.01."""
         assert financials.round_cents(0.005) * 2 == pytest.approx(0.02, abs=1e-9)
         assert financials.round_cents(0.005 + 0.005) == pytest.approx(0.01, abs=1e-9)
+
+
+class TestSudenergieAugust2026:
+    """SUDenergie "Décompte mensuel 08.2026" (382,759 kWh bought from grid).
+
+    The supplier bills the Resilienzpak subsidy *through* the compensation
+    line ("Mécanisme de compensation A -0,0371 EUR/kWh" = -0,04 EUR/kWh
+    incl. VAT). The estimate must therefore not stack the -0,001 base
+    compensation credit on top of the subsidy, and the subsidy quantity must
+    be the billed grid import — not a divergent interval recomputation
+    (the app previously showed 384,552 kWh and 81,73 EUR).
+
+    Printed total: 76,10 HTVA + 6,09 TVA = 82,19 EUR. The estimate lands
+    2 cents above because the supplier rounds the per-unit rate to four
+    decimals (-0,0371 vs. exactly -0,04/1,08 = -0,037037...).
+    """
+
+    def _august_summary(self):
+        """Run the real engine over the August 2026 invoice period."""
+        config = models.BillingConfig.from_dict({**SUDENERGIE_JUNE_2026})
+        # Enabled Resilienzpak preset, as for a fresh configuration.
+        config.billing_adjustments = models.normalize_adjustments(
+            models.default_adjustments(enabled=True)
+        )
+        data = {
+            "c_08_previous_month_consumption": 773.589,
+            "s_c_rem_last_month": 382.759,
+            "p_08_previous_month_production": 3247.407,
+            "p_11_last_month_exported": 2856.577,
+            "p_14_last_month_self_consumed": 390.83,
+            "g_05_last_month_consumption": 0.0,
+            "g_14_last_month_volume": 0.0,
+            "last_month_power_usage_over_reference": 0.09,
+        }
+        return financials.calculate_financial_summary(
+            _Hass(config),
+            _Coordinator(),
+            data,
+            "last_month",
+            datetime(2026, 8, 1),
+            datetime(2026, 8, 31, 23, 59, 59),
+        )
+
+    def test_matches_printed_total_within_supplier_rounding(self):
+        summary = self._august_summary()
+        assert summary.billed_consumption_kwh == pytest.approx(382.759, abs=1e-9)
+        # Subsidy quantity equals the billed grid import (was 384,552 before).
+        subsidy_lines = [
+            line
+            for line in summary.adjustment_lines
+            if line["preset_id"] == "lu_resilienzpak_electricity_2026"
+        ]
+        assert len(subsidy_lines) == 1
+        assert subsidy_lines[0]["quantity"] == pytest.approx(382.759, abs=1e-9)
+        # 82,21 EUR vs. printed 82,19 EUR (supplier 4-decimal rate rounding).
+        # The supplier bill excludes feed-in revenue (separate credit note),
+        # so the comparable figure is the invoice total before feed-in credit.
+        supplier_comparable = summary.invoice_estimate + summary.feed_in_revenue
+        assert supplier_comparable == pytest.approx(82.21, abs=1e-9)
+
+    def test_supplier_rate_in_compensation_field_is_cent_exact(self):
+        """Alternative supported setup: copy the supplier's published
+        compensation rate (-0,0371) into the Compensation Fund field and
+        disable the preset. No suspension applies, the single line bills
+        exactly the printed 82,19 EUR."""
+        config = models.BillingConfig.from_dict(
+            {**SUDENERGIE_JUNE_2026, "compensation_fund_rate": -0.0371}
+        )
+        config.billing_adjustments = models.normalize_adjustments(
+            models.default_adjustments(enabled=False)
+        )
+        data = {
+            "c_08_previous_month_consumption": 773.589,
+            "s_c_rem_last_month": 382.759,
+            "p_08_previous_month_production": 3247.407,
+            "p_11_last_month_exported": 2856.577,
+            "p_14_last_month_self_consumed": 390.83,
+            "g_05_last_month_consumption": 0.0,
+            "g_14_last_month_volume": 0.0,
+            "last_month_power_usage_over_reference": 0.075,
+        }
+        summary = financials.calculate_financial_summary(
+            _Hass(config),
+            _Coordinator(),
+            data,
+            "last_month",
+            datetime(2026, 8, 1),
+            datetime(2026, 8, 31, 23, 59, 59),
+        )
+        supplier_comparable = summary.invoice_estimate + summary.feed_in_revenue
+        assert supplier_comparable == pytest.approx(82.19, abs=1e-9)

@@ -69,6 +69,12 @@ LU_ELECTRICITY_PRESET_ID = "lu_resilienzpak_electricity_2026"
 LU_GAS_PRESET_ID = "lu_resilienzpak_gas_2026"
 
 #: Official Luxembourg Resilienzpak 2026 household subsidies.
+#:
+#: The electricity subsidy is channelled through the compensation mechanism:
+#: suppliers bill it as "Mécanisme de compensation A -0,0371 EUR/kWh"
+#: (= -0,04 EUR/kWh incl. VAT) instead of the base compensation credit, so
+#: the base compensation must not be stacked on top for subsidised kWh
+#: (see suspends_compensation).
 LUXEMBOURG_PRESETS: list[dict[str, Any]] = [
     {
         "id": "lu-electricity-resilienzpak-2026",
@@ -80,7 +86,8 @@ LUXEMBOURG_PRESETS: list[dict[str, Any]] = [
         "end_date": "2026-12-31",
         "vat_included": True,
         "preset_id": LU_ELECTRICITY_PRESET_ID,
-        "eligibility_note": "Residential customers below 25,000 kWh/year; applies to grid import only.",
+        "eligibility_note": "Residential customers below 25,000 kWh/year; applies to grid import only. Suppliers show this as 'Mécanisme de compensation A -0,0371/kWh'.",
+        "suspends_compensation": True,
     },
     {
         "id": "lu-gas-resilienzpak-2026",
@@ -93,6 +100,7 @@ LUXEMBOURG_PRESETS: list[dict[str, Any]] = [
         "vat_included": True,
         "preset_id": LU_GAS_PRESET_ID,
         "eligibility_note": "Eligible residential gas consumption.",
+        "suspends_compensation": False,
     },
 ]
 
@@ -169,6 +177,12 @@ def normalize_adjustment(raw: dict[str, Any], index: int = 0) -> dict[str, Any]:
     label = raw.get("label")
     preset_id = raw.get("preset_id")
     adj_id = raw.get("id")
+    if "suspends_compensation" in raw:
+        suspends_compensation = bool(raw.get("suspends_compensation"))
+    else:
+        # Stored official presets predate the flag: they carry the official
+        # semantics (no stacking with the base compensation credit).
+        suspends_compensation = str(preset_id or "") == LU_ELECTRICITY_PRESET_ID
     return {
         "id": str(adj_id).strip() if adj_id else f"custom-{index + 1}",
         "label": str(label).strip() if isinstance(label, str) and label.strip() else "Billing adjustment",
@@ -182,6 +196,7 @@ def normalize_adjustment(raw: dict[str, Any], index: int = 0) -> dict[str, Any]:
         "preset_id": str(preset_id).strip() if preset_id else "",
         "eligibility_note": str(raw.get("eligibility_note") or "").strip(),
         "tariff_already_includes_adjustment": bool(raw.get("tariff_already_includes_adjustment", False)),
+        "suspends_compensation": suspends_compensation,
     }
 
 
@@ -297,12 +312,26 @@ def _electricity_lines(
     period_start: date,
     period_end: date,
     vat_rate: float,
-) -> tuple[list[dict[str, Any]], float, bool]:
+) -> tuple[list[dict[str, Any]], float, float, float, bool]:
     """Compute electricity adjustment lines.
 
-    Returns (lines, solar_correction_gross, estimated_any).
+    Returns (lines, solar_correction_gross, suspended_grid_kwh,
+    suspended_self_kwh, estimated_any).
     Grid import per 15-min interval = max(0, house kW - solar kW) * 0.25,
     the same netting convention as the windowed tariff calculation.
+
+    Interval data is only used to split the period: when authoritative
+    period totals are available (the billed grid import / self-consumption
+    from the official meters), eligible quantities are scaled to those
+    totals so meter skew between the interval streams cannot inflate or
+    shrink the subsidy (e.g. 384,552 kWh recomputed vs. 382,759 kWh billed
+    for SUDenergie 08.2026). Without totals the interval sums are used
+    directly.
+
+    Adjustments flagged suspends_compensation (the official electricity
+    subsidy, which suppliers bill *through* the compensation line) report
+    their eligible quantities separately so callers can skip the base
+    compensation credit on those kWh instead of stacking both.
     """
     electricity = [
         adj
@@ -312,15 +341,22 @@ def _electricity_lines(
         and _active(adj)
     ]
     if not electricity:
-        return [], 0.0, False
+        return [], 0.0, 0.0, 0.0, False
 
     lines: list[dict[str, Any]] = []
     solar_correction_gross = 0.0
+    suspended_grid_kwh = 0.0
+    suspended_self_kwh = 0.0
     estimated_any = False
 
+    billed_grid = max(0.0, float(fallback_grid_import_kwh or 0.0))
+    billed_self = max(0.0, float(fallback_self_consumed_kwh or 0.0))
+
     if consumption_items:
-        eligible_kwh = {adj["id"]: 0.0 for adj in electricity}
-        eligible_self_kwh = {adj["id"]: 0.0 for adj in electricity}
+        covered_grid = {adj["id"]: 0.0 for adj in electricity}
+        covered_self = {adj["id"]: 0.0 for adj in electricity}
+        total_grid = 0.0
+        total_self = 0.0
         production_by_ts: dict[str, float] = {}
         for item in production_items or []:
             try:
@@ -340,19 +376,43 @@ def _electricity_lines(
             solar_kw = production_by_ts.get(str(item.get("startedAt") or ""), 0.0)
             grid_kwh = max(0.0, kw - solar_kw) * 0.25
             self_kwh = min(kw, solar_kw) * 0.25
+            total_grid += grid_kwh
+            total_self += self_kwh
             for adj in electricity:
                 if _covers(adj, lux_date):
-                    eligible_kwh[adj["id"]] += grid_kwh
-                    eligible_self_kwh[adj["id"]] += self_kwh
+                    covered_grid[adj["id"]] += grid_kwh
+                    covered_self[adj["id"]] += self_kwh
 
+        period_days = max(1, (period_end - period_start).days + 1)
         for adj in electricity:
+            if total_grid > 0.0 and billed_grid > 0.0:
+                quantity = billed_grid * (covered_grid[adj["id"]] / total_grid)
+                self_qty = (
+                    billed_self * (covered_self[adj["id"]] / total_self)
+                    if total_self > 0.0 and billed_self > 0.0
+                    else covered_self[adj["id"]]
+                )
+            elif billed_grid > 0.0:
+                # Intervals carry no grid import but the meter billed some:
+                # fall back to calendar-day proration for this period.
+                overlap = _overlap_days(adj, period_start, period_end)
+                share = overlap / period_days
+                estimated_any = estimated_any or (0 < overlap < period_days)
+                quantity = billed_grid * share
+                self_qty = billed_self * share
+            else:
+                quantity = covered_grid[adj["id"]]
+                self_qty = covered_self[adj["id"]]
             is_applied = applied(adj)
             lines.append(
-                _make_line(adj, eligible_kwh[adj["id"]], "kWh", vat_rate, is_applied, False)
+                _make_line(adj, quantity, "kWh", vat_rate, is_applied, False)
             )
             if is_applied:
-                solar_correction_gross += eligible_self_kwh[adj["id"]] * float(adj["amount_gross"])
-        return lines, solar_correction_gross, estimated_any
+                solar_correction_gross += self_qty * float(adj["amount_gross"])
+            if is_applied and adj.get("suspends_compensation"):
+                suspended_grid_kwh += quantity
+                suspended_self_kwh += self_qty
+        return lines, solar_correction_gross, suspended_grid_kwh, suspended_self_kwh, estimated_any
 
     # Fallback without interval data: prorate the period totals by calendar
     # day overlap and flag the result as estimated when the period must be split.
@@ -363,10 +423,12 @@ def _electricity_lines(
         estimated = 0 < overlap < period_days
         estimated_any = estimated_any or estimated
         is_applied = applied(adj)
+        quantity = billed_grid * share
+        self_qty = billed_self * share
         lines.append(
             _make_line(
                 adj,
-                max(0.0, fallback_grid_import_kwh) * share,
+                quantity,
                 "kWh",
                 vat_rate,
                 is_applied,
@@ -374,10 +436,11 @@ def _electricity_lines(
             )
         )
         if is_applied:
-            solar_correction_gross += (
-                max(0.0, fallback_self_consumed_kwh) * share * float(adj["amount_gross"])
-            )
-    return lines, solar_correction_gross, estimated_any
+            solar_correction_gross += self_qty * float(adj["amount_gross"])
+        if is_applied and adj.get("suspends_compensation"):
+            suspended_grid_kwh += quantity
+            suspended_self_kwh += self_qty
+    return lines, solar_correction_gross, suspended_grid_kwh, suspended_self_kwh, estimated_any
 
 
 def _gas_lines(
@@ -447,7 +510,7 @@ def compute_billing_adjustments(
     """
     normalized = normalize_adjustments(adjustments or [])
 
-    electricity_lines, solar_correction_gross, elec_estimated = _electricity_lines(
+    electricity_lines, solar_correction_gross, suspended_grid_kwh, suspended_self_kwh, elec_estimated = _electricity_lines(
         normalized,
         consumption_items,
         production_items,
@@ -481,6 +544,8 @@ def compute_billing_adjustments(
             "applied_gross": elec_gross,
             "applied_net": elec_net,
             "solar_correction_gross": solar_correction_gross,
+            "suspended_grid_kwh": suspended_grid_kwh,
+            "suspended_self_kwh": suspended_self_kwh,
             "estimated": elec_estimated,
         },
         "gas": {

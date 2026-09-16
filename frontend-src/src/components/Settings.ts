@@ -347,9 +347,15 @@ function renderAdjustmentRow(index: number, adj: BillingAdjustment): string {
       </div>
       <input type="hidden" name="adjustment_${index}_id" value="${adj.id}" />
       <input type="hidden" name="adjustment_${index}_preset_id" value="${adj.preset_id ?? ""}" />
+      <input type="hidden" name="adjustment_${index}_suspends_compensation" value="${adj.suspends_compensation ? "1" : ""}" />
       ${showDoubleCountWarning ? `
       <div class="settings-note settings-note-warning">
         ⚠️ Only enable this if your configured electricity price does <strong>not</strong> already include the government subsidy.
+      </div>
+      ` : ""}
+      ${isLuElectricity && adj.enabled && adj.suspends_compensation ? `
+      <div class="settings-note">
+        Suppliers bill this subsidy through the compensation line (“Mécanisme de compensation A −0,0371/kWh”), so the base Compensation Fund credit is automatically suspended on subsidised kWh instead of being added on top.
       </div>
       ` : ""}
       <div class="form-row">

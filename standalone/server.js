@@ -91,8 +91,9 @@ const DEFAULT_BILLING = {
       end_date: "2026-12-31",
       vat_included: true,
       preset_id: "lu_resilienzpak_electricity_2026",
-      eligibility_note: "Residential customers below 25,000 kWh/year; applies to grid import only.",
+      eligibility_note: "Residential customers below 25,000 kWh/year; applies to grid import only. Suppliers show this as 'Mécanisme de compensation A -0,0371/kWh'.",
       tariff_already_includes_adjustment: false,
+      suspends_compensation: true,
     },
     {
       id: "lu-gas-resilienzpak-2026",

@@ -222,3 +222,100 @@ def test_normalize_adjustments_tolerates_garbage() -> None:
     # so the engine skips them instead of applying a negative subsidy.
     assert normalized[1]["amount_gross"] == -5.0
     assert engine.validate_adjustment(normalized[1])
+
+
+def _subsidy_preset(**overrides):
+    """Build the official electricity preset with test overrides."""
+    base = {
+        "id": "lu-electricity-resilienzpak-2026",
+        "label": "Luxembourg electricity subsidy 2026",
+        "enabled": True,
+        "commodity": "electricity",
+        "basis": "grid_import_kwh",
+        "amount_gross": 0.04,
+        "start_date": "2026-08-01",
+        "end_date": "2026-12-31",
+        "vat_included": True,
+        "preset_id": "lu_resilienzpak_electricity_2026",
+    }
+    return {**base, **overrides}
+
+
+def test_suspends_compensation_defaults_to_official_preset() -> None:
+    """Stored presets without the flag keep the official no-stacking semantics."""
+    normalized = engine.normalize_adjustments([_subsidy_preset()])
+    assert normalized[0]["suspends_compensation"] is True
+    custom = engine.normalize_adjustments(
+        [{**_subsidy_preset(), "id": "custom", "preset_id": ""}]
+    )
+    assert custom[0]["suspends_compensation"] is False
+    explicit = engine.normalize_adjustments(
+        [_subsidy_preset(suspends_compensation=False)]
+    )
+    assert explicit[0]["suspends_compensation"] is False
+
+
+def test_suspended_quantities_follow_billed_totals() -> None:
+    """Suspended kWh equal the billed totals for a fully covered period."""
+    result = engine.compute_billing_adjustments(
+        [_subsidy_preset()],
+        vat_rate=0.08,
+        gas_vat_rate=0.08,
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 31),
+        consumption_items=[
+            {"value": 100, "startedAt": "2026-08-15T10:00:00+02:00"},
+            {"value": 100, "startedAt": "2026-08-15T10:15:00+02:00"},
+        ],
+        production_items=[
+            {"value": 40, "startedAt": "2026-08-15T10:00:00+02:00"},
+        ],
+        fallback_grid_import_kwh=45.0,
+        fallback_self_consumed_kwh=10.0,
+    )
+    electricity = result["electricity"]
+    # Interval grid sums to 40 kWh but the meter billed 45: quantities scale.
+    assert electricity["lines"][0]["quantity"] == 45.0
+    assert electricity["suspended_grid_kwh"] == 45.0
+    assert electricity["suspended_self_kwh"] == 10.0
+    # The solar correction uses the scaled self-consumption as well.
+    assert electricity["solar_correction_gross"] == 10.0 * 0.04
+
+
+def test_suspended_quantities_without_stacking_flag() -> None:
+    """Custom adjustments never suspend the base compensation credit."""
+    result = engine.compute_billing_adjustments(
+        [_subsidy_preset(id="custom", preset_id="")],
+        vat_rate=0.08,
+        gas_vat_rate=0.08,
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 31),
+        consumption_items=[
+            {"value": 100, "startedAt": "2026-08-15T10:00:00+02:00"},
+        ],
+        fallback_grid_import_kwh=25.0,
+        fallback_self_consumed_kwh=0.0,
+    )
+    assert result["electricity"]["suspended_grid_kwh"] == 0.0
+    assert result["electricity"]["suspended_self_kwh"] == 0.0
+
+
+def test_no_suspension_when_tariff_includes_adjustment() -> None:
+    """An informational adjustment changes neither the invoice nor the base
+    compensation line: the configured tariff already reflects reality."""
+    result = engine.compute_billing_adjustments(
+        [_subsidy_preset(tariff_already_includes_adjustment=True)],
+        vat_rate=0.08,
+        gas_vat_rate=0.08,
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 31),
+        consumption_items=[
+            {"value": 100, "startedAt": "2026-08-15T10:00:00+02:00"},
+        ],
+        fallback_grid_import_kwh=25.0,
+        fallback_self_consumed_kwh=0.0,
+    )
+    electricity = result["electricity"]
+    assert electricity["applied_gross"] == 0.0
+    assert electricity["suspended_grid_kwh"] == 0.0
+    assert electricity["suspended_self_kwh"] == 0.0

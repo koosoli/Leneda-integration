@@ -35,6 +35,12 @@ export interface BillingAdjustment {
   eligibility_note?: string;
   /** Set when the configured tariff already reflects this adjustment. */
   tariff_already_includes_adjustment?: boolean;
+  /**
+   * Set for the official electricity subsidy: suppliers bill it *through*
+   * the compensation line ("Mécanisme de compensation A -0,0371/kWh"), so
+   * the base compensation credit must not stack on subsidised kWh.
+   */
+  suspends_compensation?: boolean;
 }
 
 export interface AdjustmentLine {
@@ -62,7 +68,11 @@ export interface CommodityAdjustmentResult {
 }
 
 export interface BillingAdjustmentResult {
-  electricity: CommodityAdjustmentResult & { solar_correction_gross: number };
+  electricity: CommodityAdjustmentResult & {
+    solar_correction_gross: number;
+    suspended_grid_kwh: number;
+    suspended_self_kwh: number;
+  };
   gas: CommodityAdjustmentResult;
   estimated: boolean;
 }
@@ -75,7 +85,14 @@ export interface IntervalItem {
 export const LU_ELECTRICITY_PRESET_ID = "lu_resilienzpak_electricity_2026";
 export const LU_GAS_PRESET_ID = "lu_resilienzpak_gas_2026";
 
-/** Official Luxembourg Resilienzpak 2026 household subsidies. */
+/** Official Luxembourg Resilienzpak 2026 household subsidies.
+ *
+ * The electricity subsidy is channelled through the compensation mechanism:
+ * suppliers bill it as "Mécanisme de compensation A -0,0371 EUR/kWh"
+ * (= -0,04 EUR/kWh incl. VAT) instead of the base compensation credit, so
+ * the base compensation must not be stacked on top for subsidised kWh
+ * (see suspendsCompensation).
+ */
 export const LUXEMBOURG_PRESETS: BillingAdjustment[] = [
   {
     id: "lu-electricity-resilienzpak-2026",
@@ -88,8 +105,9 @@ export const LUXEMBOURG_PRESETS: BillingAdjustment[] = [
     end_date: "2026-12-31",
     vat_included: true,
     preset_id: LU_ELECTRICITY_PRESET_ID,
-    eligibility_note: "Residential customers below 25,000 kWh/year; applies to grid import only.",
+    eligibility_note: "Residential customers below 25,000 kWh/year; applies to grid import only. Suppliers show this as 'Mécanisme de compensation A -0,0371/kWh'.",
     tariff_already_includes_adjustment: false,
+    suspends_compensation: true,
   },
   {
     id: "lu-gas-resilienzpak-2026",
@@ -104,6 +122,7 @@ export const LUXEMBOURG_PRESETS: BillingAdjustment[] = [
     preset_id: LU_GAS_PRESET_ID,
     eligibility_note: "Eligible residential gas consumption.",
     tariff_already_includes_adjustment: false,
+    suspends_compensation: false,
   },
 ];
 
@@ -139,6 +158,13 @@ export function validateAdjustment(raw: Partial<BillingAdjustment>): string[] {
 export function normalizeAdjustment(raw: Partial<BillingAdjustment>, index = 0): BillingAdjustment {
   let amount = Number(raw.amount_gross);
   if (!isFinite(amount)) amount = 0;
+  const presetId = raw.preset_id ? String(raw.preset_id).trim() : "";
+  // Stored official presets predate the flag: they carry the official
+  // semantics (no stacking with the base compensation credit).
+  const suspendsCompensation =
+    raw.suspends_compensation !== undefined
+      ? !!raw.suspends_compensation
+      : presetId === LU_ELECTRICITY_PRESET_ID;
   return {
     id: raw.id ? String(raw.id).trim() : `custom-${index + 1}`,
     label: raw.label && String(raw.label).trim() ? String(raw.label).trim() : "Billing adjustment",
@@ -153,9 +179,10 @@ export function normalizeAdjustment(raw: Partial<BillingAdjustment>, index = 0):
     start_date: String(raw.start_date ?? "").slice(0, 10),
     end_date: String(raw.end_date ?? "").slice(0, 10),
     vat_included: raw.vat_included !== false,
-    preset_id: raw.preset_id ? String(raw.preset_id).trim() : "",
+    preset_id: presetId,
     eligibility_note: raw.eligibility_note ? String(raw.eligibility_note).trim() : "",
     tariff_already_includes_adjustment: !!raw.tariff_already_includes_adjustment,
+    suspends_compensation: suspendsCompensation,
   };
 }
 
@@ -257,19 +284,33 @@ function electricityLines(
   periodStart: string,
   periodEnd: string,
   vatRate: number,
-): { lines: AdjustmentLine[]; solarCorrectionGross: number; estimatedAny: boolean } {
+): {
+  lines: AdjustmentLine[];
+  solarCorrectionGross: number;
+  suspendedGridKwh: number;
+  suspendedSelfKwh: number;
+  estimatedAny: boolean;
+} {
   const electricity = adjustments.filter(
     (adj) => adj.commodity === "electricity" && adj.basis === "grid_import_kwh" && isActive(adj),
   );
-  if (electricity.length === 0) return { lines: [], solarCorrectionGross: 0, estimatedAny: false };
+  if (electricity.length === 0)
+    return { lines: [], solarCorrectionGross: 0, suspendedGridKwh: 0, suspendedSelfKwh: 0, estimatedAny: false };
 
   const lines: AdjustmentLine[] = [];
   let solarCorrectionGross = 0;
+  let suspendedGridKwh = 0;
+  let suspendedSelfKwh = 0;
   let estimatedAny = false;
 
+  const billedGrid = Math.max(0, fallbackGridImportKwh || 0);
+  const billedSelf = Math.max(0, fallbackSelfConsumedKwh || 0);
+
   if (consumptionItems && consumptionItems.length > 0) {
-    const eligibleKwh = new Map<string, number>(electricity.map((adj) => [adj.id, 0]));
-    const eligibleSelfKwh = new Map<string, number>(electricity.map((adj) => [adj.id, 0]));
+    const coveredGrid = new Map<string, number>(electricity.map((adj) => [adj.id, 0]));
+    const coveredSelf = new Map<string, number>(electricity.map((adj) => [adj.id, 0]));
+    let totalGrid = 0;
+    let totalSelf = 0;
     const productionByTs = new Map<string, number>();
     for (const item of productionItems ?? []) {
       const ts = String(item.startedAt ?? "");
@@ -284,20 +325,47 @@ function electricityLines(
       const solarKw = productionByTs.get(ts) ?? 0;
       const gridKwh = Math.max(0, kw - solarKw) * 0.25;
       const selfKwh = Math.min(kw, solarKw) * 0.25;
+      totalGrid += gridKwh;
+      totalSelf += selfKwh;
       for (const adj of electricity) {
         if (covers(adj, luxDate)) {
-          eligibleKwh.set(adj.id, eligibleKwh.get(adj.id)! + gridKwh);
-          eligibleSelfKwh.set(adj.id, eligibleSelfKwh.get(adj.id)! + selfKwh);
+          coveredGrid.set(adj.id, coveredGrid.get(adj.id)! + gridKwh);
+          coveredSelf.set(adj.id, coveredSelf.get(adj.id)! + selfKwh);
         }
       }
     }
 
+    const periodDays = Math.max(1, dayNumber(periodEnd) - dayNumber(periodStart) + 1);
     for (const adj of electricity) {
+      let quantity: number;
+      let selfQty: number;
+      if (totalGrid > 0 && billedGrid > 0) {
+        // Intervals only split the period; scale to the billed meter totals
+        // so stream skew cannot inflate or shrink the subsidy.
+        quantity = billedGrid * (coveredGrid.get(adj.id)! / totalGrid);
+        selfQty =
+          totalSelf > 0 && billedSelf > 0
+            ? billedSelf * (coveredSelf.get(adj.id)! / totalSelf)
+            : coveredSelf.get(adj.id)!;
+      } else if (billedGrid > 0) {
+        const overlap = overlapDays(adj, periodStart, periodEnd);
+        const share = overlap / periodDays;
+        if (overlap > 0 && overlap < periodDays) estimatedAny = true;
+        quantity = billedGrid * share;
+        selfQty = billedSelf * share;
+      } else {
+        quantity = coveredGrid.get(adj.id)!;
+        selfQty = coveredSelf.get(adj.id)!;
+      }
       const applied = isApplied(adj);
-      lines.push(makeLine(adj, eligibleKwh.get(adj.id)!, "kWh", vatRate, applied, false));
-      if (applied) solarCorrectionGross += eligibleSelfKwh.get(adj.id)! * adj.amount_gross;
+      lines.push(makeLine(adj, quantity, "kWh", vatRate, applied, false));
+      if (applied) solarCorrectionGross += selfQty * adj.amount_gross;
+      if (applied && adj.suspends_compensation) {
+        suspendedGridKwh += quantity;
+        suspendedSelfKwh += selfQty;
+      }
     }
-    return { lines, solarCorrectionGross, estimatedAny };
+    return { lines, solarCorrectionGross, suspendedGridKwh, suspendedSelfKwh, estimatedAny };
   }
 
   // Fallback without interval data: prorate by calendar day overlap and flag
@@ -309,14 +377,20 @@ function electricityLines(
     const estimated = overlap > 0 && overlap < periodDays;
     estimatedAny = estimatedAny || estimated;
     const applied = isApplied(adj);
+    const quantity = billedGrid * share;
+    const selfQty = billedSelf * share;
     lines.push(
-      makeLine(adj, Math.max(0, fallbackGridImportKwh) * share, "kWh", vatRate, applied, estimated),
+      makeLine(adj, quantity, "kWh", vatRate, applied, estimated),
     );
     if (applied) {
-      solarCorrectionGross += Math.max(0, fallbackSelfConsumedKwh) * share * adj.amount_gross;
+      solarCorrectionGross += selfQty * adj.amount_gross;
+    }
+    if (applied && adj.suspends_compensation) {
+      suspendedGridKwh += quantity;
+      suspendedSelfKwh += selfQty;
     }
   }
-  return { lines, solarCorrectionGross, estimatedAny };
+  return { lines, solarCorrectionGross, suspendedGridKwh, suspendedSelfKwh, estimatedAny };
 }
 
 function gasLines(
@@ -410,6 +484,8 @@ export function computeBillingAdjustments(
       applied_gross: elecTotals.gross,
       applied_net: elecTotals.net,
       solar_correction_gross: electricity.solarCorrectionGross,
+      suspended_grid_kwh: electricity.suspendedGridKwh,
+      suspended_self_kwh: electricity.suspendedSelfKwh,
       estimated: electricity.estimatedAny,
     },
     gas: {

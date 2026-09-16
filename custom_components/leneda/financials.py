@@ -106,6 +106,8 @@ class FinancialSummary:
     electricity_adjustments_gross: float
     gas_adjustments_gross: float
     solar_subsidy_correction: float
+    suspended_grid_kwh: float
+    suspended_self_kwh: float
     adjustments_estimated: bool
     adjustment_lines: tuple = ()
 
@@ -612,6 +614,34 @@ def calculate_financial_summary(
     ]
     meter_fees_total = sum(meter_fee_lines)
 
+    # Dated billing adjustments (e.g. Luxembourg 2026 subsidies) are subtracted
+    # as net amounts before VAT so the final gross reduction matches the
+    # official per-unit rate exactly. Computed before the invoice lines
+    # because a suspending adjustment (the electricity subsidy, which
+    # suppliers bill *through* the compensation line) removes the base
+    # compensation credit on the same kWh instead of stacking both.
+    adjustments = compute_billing_adjustments(
+        getattr(billing_config, "billing_adjustments", None),
+        vat_rate=float(billing_config.vat_rate or 0.0),
+        gas_vat_rate=float(billing_config.gas_vat_rate or 0.0),
+        period_start=start_dt.date(),
+        period_end=end_dt.date(),
+        consumption_items=consumption_items or [],
+        production_items=production_items or [],
+        fallback_grid_import_kwh=billed_consumption,
+        fallback_self_consumed_kwh=solar_to_home,
+        gas_volume_m3=gas_volume,
+        gas_energy_kwh=gas_energy,
+    )
+    electricity_adj = adjustments["electricity"]
+    gas_adj = adjustments["gas"]
+    suspended_grid_kwh = min(
+        billed_consumption, max(0.0, float(electricity_adj.get("suspended_grid_kwh") or 0.0))
+    )
+    suspended_self_kwh = min(
+        solar_to_home, max(0.0, float(electricity_adj.get("suspended_self_kwh") or 0.0))
+    )
+
     # A utility prices each invoice line to the cent and then adds the rounded
     # lines up, so the subtotal is built the same way here. Summing raw values
     # instead would drift up to a cent away from the supplier's total.
@@ -628,31 +658,12 @@ def calculate_financial_summary(
         network_variable_cost,
         exceedance_cost,
         *meter_fee_lines,
-        billed_consumption * float(billing_config.compensation_fund_rate or 0.0),
+        (billed_consumption - suspended_grid_kwh) * float(billing_config.compensation_fund_rate or 0.0),
         billed_consumption * float(billing_config.electricity_tax_rate or 0.0),
         -max(0.0, float(getattr(billing_config, "domiciliation_discount", 0.0) or 0.0)) * pro_factor,
         -max(0.0, float(billing_config.connect_discount or 0.0)) * pro_factor,
     ]
     subtotal_costs = round_cents(sum(round_cents(amount) for amount in invoice_lines))
-
-    # Dated billing adjustments (e.g. Luxembourg 2026 subsidies) are subtracted
-    # as net amounts before VAT so the final gross reduction matches the
-    # official per-unit rate exactly.
-    adjustments = compute_billing_adjustments(
-        getattr(billing_config, "billing_adjustments", None),
-        vat_rate=float(billing_config.vat_rate or 0.0),
-        gas_vat_rate=float(billing_config.gas_vat_rate or 0.0),
-        period_start=start_dt.date(),
-        period_end=end_dt.date(),
-        consumption_items=consumption_items or [],
-        production_items=production_items or [],
-        fallback_grid_import_kwh=billed_consumption,
-        fallback_self_consumed_kwh=solar_to_home,
-        gas_volume_m3=gas_volume,
-        gas_energy_kwh=gas_energy,
-    )
-    electricity_adj = adjustments["electricity"]
-    gas_adj = adjustments["gas"]
 
     # Adjustments are their own invoice line, so they are rounded like one, and
     # VAT is charged on the rounded subtotal exactly as the supplier does.
@@ -693,6 +704,16 @@ def calculate_financial_summary(
     # lower by the applicable gross subsidy per kWh.
     solar_subsidy_correction = float(electricity_adj["solar_correction_gross"])
     total_self_consumed_savings = total_self_consumed_savings - solar_subsidy_correction
+    # Where the subsidy suspends the base compensation credit, a self-consumed
+    # kWh also avoids no base compensation — remove that value as well.
+    suspended_compensation_correction = (
+        suspended_self_kwh
+        * float(billing_config.compensation_fund_rate or 0.0)
+        * (1 + float(billing_config.vat_rate or 0.0))
+    )
+    total_self_consumed_savings = (
+        total_self_consumed_savings - suspended_compensation_correction
+    )
     self_use_vs_export_value = total_self_consumed_savings - (
         float(priority_allocation["total_self_use_export_equivalent"])
         if priority_allocation is not None
@@ -775,6 +796,8 @@ def calculate_financial_summary(
         electricity_adjustments_gross=round(float(electricity_adj["applied_gross"]), 2),
         gas_adjustments_gross=round(float(gas_adj["applied_gross"]), 2),
         solar_subsidy_correction=round(solar_subsidy_correction, 2),
+        suspended_grid_kwh=round(suspended_grid_kwh, 4),
+        suspended_self_kwh=round(suspended_self_kwh, 4),
         adjustments_estimated=bool(adjustments["estimated"]),
         adjustment_lines=adjustment_lines,
     )
@@ -830,6 +853,8 @@ def build_financial_sensor_payloads(
             "electricity_adjustments_gross": summary.electricity_adjustments_gross,
             "gas_adjustments_gross": summary.gas_adjustments_gross,
             "solar_subsidy_correction": summary.solar_subsidy_correction,
+            "suspended_grid_kwh": summary.suspended_grid_kwh,
+            "suspended_self_kwh": summary.suspended_self_kwh,
             "adjustments_estimated": summary.adjustments_estimated,
             "adjustment_lines": list(summary.adjustment_lines),
         }

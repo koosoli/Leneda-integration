@@ -196,4 +196,75 @@ describe("timezone and normalization", () => {
   it("exposes the documented gas conversion factor", () => {
     expect(GAS_KWH_PER_M3).toBe(11.0);
   });
+
+  it("defaults suspends_compensation to the official electricity preset", () => {
+    const preset = {
+      id: "lu-electricity-resilienzpak-2026",
+      label: "Luxembourg electricity subsidy 2026",
+      enabled: true,
+      commodity: "electricity",
+      basis: "grid_import_kwh",
+      amount_gross: 0.04,
+      start_date: "2026-08-01",
+      end_date: "2026-12-31",
+      vat_included: true,
+      preset_id: "lu_resilienzpak_electricity_2026",
+    };
+    expect(normalizeAdjustments([preset])[0].suspends_compensation).toBe(true);
+    expect(
+      normalizeAdjustments([{ ...preset, id: "custom", preset_id: "" }])[0].suspends_compensation,
+    ).toBe(false);
+  });
+});
+
+describe("compensation suspension and billed totals", () => {
+  const preset = {
+    id: "lu-electricity-resilienzpak-2026",
+    label: "Luxembourg electricity subsidy 2026",
+    enabled: true,
+    commodity: "electricity",
+    basis: "grid_import_kwh",
+    amount_gross: 0.04,
+    start_date: "2026-08-01",
+    end_date: "2026-12-31",
+    vat_included: true,
+    preset_id: "lu_resilienzpak_electricity_2026",
+  };
+
+  it("scales quantities to billed totals and reports suspended kWh", () => {
+    const result = computeBillingAdjustments({
+      adjustments: [preset],
+      vatRate: 0.08,
+      gasVatRate: 0.08,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      consumptionItems: [
+        { value: 100, startedAt: "2026-08-15T10:00:00+02:00" },
+        { value: 100, startedAt: "2026-08-15T10:15:00+02:00" },
+      ],
+      productionItems: [{ value: 40, startedAt: "2026-08-15T10:00:00+02:00" }],
+      fallbackGridImportKwh: 45,
+      fallbackSelfConsumedKwh: 10,
+    });
+    // Interval grid sums to 40 kWh but the meter billed 45.
+    expectClose(result.electricity.lines[0].quantity, 45, "quantity");
+    expectClose(result.electricity.suspended_grid_kwh, 45, "suspended_grid_kwh");
+    expectClose(result.electricity.suspended_self_kwh, 10, "suspended_self_kwh");
+    expectClose(result.electricity.solar_correction_gross, 0.4, "solar_correction_gross");
+  });
+
+  it("custom adjustments never suspend the base compensation credit", () => {
+    const result = computeBillingAdjustments({
+      adjustments: [{ ...preset, id: "custom", preset_id: "" }],
+      vatRate: 0.08,
+      gasVatRate: 0.08,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      consumptionItems: [{ value: 100, startedAt: "2026-08-15T10:00:00+02:00" }],
+      fallbackGridImportKwh: 25,
+      fallbackSelfConsumedKwh: 0,
+    });
+    expectClose(result.electricity.suspended_grid_kwh, 0, "suspended_grid_kwh");
+    expectClose(result.electricity.suspended_self_kwh, 0, "suspended_self_kwh");
+  });
 });
