@@ -182,6 +182,78 @@ class TestRoundingIsAppliedPerLine:
         assert financials.round_cents(0.005 + 0.005) == pytest.approx(0.01, abs=1e-9)
 
 
+class TestGasVolumeOnlyBilling:
+    """Issue #92: volume-only gas meters billed 0 EUR on variable lines.
+
+    With no metered kWh channel, billing runs on energy derived from the
+    measured volume (default 11 kWh/m3, configurable via gas_kwh_per_m3).
+    """
+
+    def _gas_summary(self, **overrides):
+        """Run the real engine with gas volume but no gas energy."""
+        config = models.BillingConfig.from_dict(
+            {**SUDENERGIE_JUNE_2026, "billing_adjustments": [], **overrides}
+        )
+        data = {
+            "c_08_previous_month_consumption": 0.0,
+            "s_c_rem_last_month": 0.0,
+            "p_08_previous_month_production": 0.0,
+            "p_11_last_month_exported": 0.0,
+            "p_14_last_month_self_consumed": 0.0,
+            "g_05_last_month_consumption": 0.0,
+            "g_14_last_month_volume": 0.735,
+            "last_month_power_usage_over_reference": 0.0,
+        }
+        return financials.calculate_financial_summary(
+            _Hass(config),
+            _Coordinator(),
+            data,
+            "last_month",
+            datetime(2026, 8, 1),
+            datetime(2026, 8, 31, 23, 59, 59),
+        )
+
+    def test_volume_derives_billed_energy(self):
+        summary = self._gas_summary()
+        assert summary.billed_gas_energy_kwh == pytest.approx(0.735 * 11.0, abs=1e-9)
+        assert summary.gas_energy_estimated is True
+        # 6.50 + 0.44 + 4.80 + 0.10 + 0.01 = 11.85 HTVA, 0.95 VAT = 12.80.
+        # Before the fix the same meter billed only fixed fees (12.20).
+        assert summary.gas_total == pytest.approx(12.80, abs=1e-9)
+
+    def test_custom_conversion_factor(self):
+        summary = self._gas_summary(gas_kwh_per_m3=10.0)
+        assert summary.billed_gas_energy_kwh == pytest.approx(7.35, abs=1e-9)
+        # 6.50 + 0.40 + 4.80 + 0.09 + 0.01 = 11.80 HTVA, 0.94 VAT = 12.74.
+        assert summary.gas_total == pytest.approx(12.74, abs=1e-9)
+
+    def test_metered_energy_takes_precedence(self):
+        config = models.BillingConfig.from_dict(
+            {**SUDENERGIE_JUNE_2026, "billing_adjustments": []}
+        )
+        data = {
+            "c_08_previous_month_consumption": 0.0,
+            "s_c_rem_last_month": 0.0,
+            "p_08_previous_month_production": 0.0,
+            "p_11_last_month_exported": 0.0,
+            "p_14_last_month_self_consumed": 0.0,
+            "g_05_last_month_consumption": 8.085,
+            "g_14_last_month_volume": 0.735,
+            "last_month_power_usage_over_reference": 0.0,
+        }
+        summary = financials.calculate_financial_summary(
+            _Hass(config),
+            _Coordinator(),
+            data,
+            "last_month",
+            datetime(2026, 8, 1),
+            datetime(2026, 8, 31, 23, 59, 59),
+        )
+        assert summary.billed_gas_energy_kwh == pytest.approx(8.085, abs=1e-9)
+        assert summary.gas_energy_estimated is False
+        assert summary.gas_total == pytest.approx(12.80, abs=1e-9)
+
+
 class TestSudenergieAugust2026:
     """SUDenergie "Décompte mensuel 08.2026" (382,759 kWh bought from grid).
 

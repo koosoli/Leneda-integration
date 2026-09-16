@@ -41,6 +41,10 @@ class BillingConfig:
     gas_network_variable_rate: float = 0.0120
     gas_tax_rate: float = 0.0010
     gas_vat_rate: float = 0.08
+    # Volume-to-energy conversion for volume-only gas meters (no kWh channel).
+    # Used for billing when no metered gas energy exists (default ~11 kWh/m3
+    # for Luxembourg; override with the supplier's calorific value).
+    gas_kwh_per_m3: float = 11.0
     compensation_fund_rate: float = -0.0010
     electricity_tax_rate: float = 0.0010
     domiciliation_discount: float = 1.00
@@ -79,6 +83,7 @@ class BillingConfig:
             "gas_network_variable_rate": self.gas_network_variable_rate,
             "gas_tax_rate": self.gas_tax_rate,
             "gas_vat_rate": self.gas_vat_rate,
+            "gas_kwh_per_m3": self.gas_kwh_per_m3,
             "compensation_fund_rate": self.compensation_fund_rate,
             "electricity_tax_rate": self.electricity_tax_rate,
             "domiciliation_discount": self.domiciliation_discount,
@@ -115,6 +120,7 @@ class BillingConfig:
             gas_network_variable_rate=cls._coerce_float(migrated.get("gas_network_variable_rate"), 0.0120),
             gas_tax_rate=cls._coerce_float(migrated.get("gas_tax_rate"), 0.0010),
             gas_vat_rate=cls._coerce_float(migrated.get("gas_vat_rate"), 0.08),
+            gas_kwh_per_m3=cls._coerce_float(migrated.get("gas_kwh_per_m3"), 11.0),
             compensation_fund_rate=cls._coerce_float(migrated.get("compensation_fund_rate"), -0.0010),
             electricity_tax_rate=cls._coerce_float(migrated.get("electricity_tax_rate"), 0.0010),
             domiciliation_discount=cls._coerce_float(migrated.get("domiciliation_discount"), 1.00),

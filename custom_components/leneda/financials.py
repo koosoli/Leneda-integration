@@ -108,6 +108,8 @@ class FinancialSummary:
     solar_subsidy_correction: float
     suspended_grid_kwh: float
     suspended_self_kwh: float
+    billed_gas_energy_kwh: float
+    gas_energy_estimated: bool
     adjustments_estimated: bool
     adjustment_lines: tuple = ()
 
@@ -570,6 +572,17 @@ def calculate_financial_summary(
     gas_energy = float(data.get(keys["gas_energy"], 0) or 0)
     gas_volume = float(data.get(keys["gas_volume"], 0) or 0)
     has_gas = gas_energy > 0 or gas_volume > 0
+    # Volume-only gas meters have no metered kWh channel: bill the variable
+    # lines on energy derived from the measured volume with the configured
+    # conversion factor instead of billing 0 EUR (issue #92).
+    try:
+        gas_kwh_per_m3 = float(getattr(billing_config, "gas_kwh_per_m3", 11.0) or 11.0)
+    except (TypeError, ValueError):
+        gas_kwh_per_m3 = 11.0
+    if not math.isfinite(gas_kwh_per_m3) or gas_kwh_per_m3 <= 0:
+        gas_kwh_per_m3 = 11.0
+    gas_energy_estimated = gas_energy <= 0.0 and gas_volume > 0.0
+    billed_gas_energy = gas_energy if gas_energy > 0.0 else gas_volume * gas_kwh_per_m3
     rate_windows = list(billing_config.consumption_rate_windows or [])
     reference_windows = list(billing_config.reference_power_windows or [])
     ref_power = get_effective_reference_power(hass, coordinator.entry)
@@ -632,6 +645,7 @@ def calculate_financial_summary(
         fallback_self_consumed_kwh=solar_to_home,
         gas_volume_m3=gas_volume,
         gas_energy_kwh=gas_energy,
+        gas_kwh_per_m3=gas_kwh_per_m3,
     )
     electricity_adj = adjustments["electricity"]
     gas_adj = adjustments["gas"]
@@ -742,10 +756,10 @@ def calculate_financial_summary(
             round_cents(amount)
             for amount in (
                 float(billing_config.gas_fixed_fee or 0.0) * pro_factor,
-                gas_energy * float(billing_config.gas_variable_rate or 0.0),
+                billed_gas_energy * float(billing_config.gas_variable_rate or 0.0),
                 float(billing_config.gas_network_fee or 0.0) * pro_factor,
-                gas_energy * float(billing_config.gas_network_variable_rate or 0.0),
-                gas_energy * float(billing_config.gas_tax_rate or 0.0),
+                billed_gas_energy * float(billing_config.gas_network_variable_rate or 0.0),
+                billed_gas_energy * float(billing_config.gas_tax_rate or 0.0),
             )
         )
     )
@@ -798,6 +812,8 @@ def calculate_financial_summary(
         solar_subsidy_correction=round(solar_subsidy_correction, 2),
         suspended_grid_kwh=round(suspended_grid_kwh, 4),
         suspended_self_kwh=round(suspended_self_kwh, 4),
+        billed_gas_energy_kwh=round(billed_gas_energy, 4),
+        gas_energy_estimated=bool(gas_energy_estimated),
         adjustments_estimated=bool(adjustments["estimated"]),
         adjustment_lines=adjustment_lines,
     )
@@ -855,6 +871,8 @@ def build_financial_sensor_payloads(
             "solar_subsidy_correction": summary.solar_subsidy_correction,
             "suspended_grid_kwh": summary.suspended_grid_kwh,
             "suspended_self_kwh": summary.suspended_self_kwh,
+            "billed_gas_energy_kwh": summary.billed_gas_energy_kwh,
+            "gas_energy_estimated": summary.gas_energy_estimated,
             "adjustments_estimated": summary.adjustments_estimated,
             "adjustment_lines": list(summary.adjustment_lines),
         }

@@ -450,13 +450,14 @@ def _gas_lines(
     period_start: date,
     period_end: date,
     vat_rate: float,
+    gas_kwh_per_m3: float = GAS_KWH_PER_M3,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Compute gas adjustment lines from period volume.
 
     Gas interval data is not available, so partial periods are prorated by
     calendar days and flagged estimated. Volume is never silently treated as
-    kWh: when only energy exists it is converted with GAS_KWH_PER_M3 and
-    flagged estimated.
+    kWh: when only energy exists it is converted with the configured
+    volume-to-energy factor and flagged estimated.
     """
     gas = [
         adj
@@ -470,8 +471,14 @@ def _gas_lines(
 
     estimated_any = False
     volume = max(0.0, float(gas_volume_m3 or 0.0))
+    try:
+        factor = float(gas_kwh_per_m3 or GAS_KWH_PER_M3)
+    except (TypeError, ValueError):
+        factor = GAS_KWH_PER_M3
+    if factor != factor or factor <= 0:  # NaN or non-positive guard
+        factor = GAS_KWH_PER_M3
     if volume <= 0.0 and gas_energy_kwh > 0:
-        volume = float(gas_energy_kwh) / GAS_KWH_PER_M3
+        volume = float(gas_energy_kwh) / factor
         estimated_any = True
 
     period_days = max(1, (period_end - period_start).days + 1)
@@ -501,6 +508,7 @@ def compute_billing_adjustments(
     fallback_self_consumed_kwh: float = 0.0,
     gas_volume_m3: float = 0.0,
     gas_energy_kwh: float = 0.0,
+    gas_kwh_per_m3: float = GAS_KWH_PER_M3,
 ) -> dict[str, Any]:
     """Compute all billing-adjustment lines for one invoice period.
 
@@ -527,6 +535,7 @@ def compute_billing_adjustments(
         period_start,
         period_end,
         float(gas_vat_rate or 0.0),
+        gas_kwh_per_m3,
     )
 
     def _totals(lines: list[dict[str, Any]]) -> tuple[float, float]:

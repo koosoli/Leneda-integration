@@ -171,6 +171,8 @@ export interface BillingConfig {
   gas_network_variable_rate: number;
   gas_tax_rate: number;
   gas_vat_rate: number;
+  /** Gas volume-to-energy conversion for volume-only meters (kWh per m³). */
+  gas_kwh_per_m3?: number;
   compensation_fund_rate: number;
   electricity_tax_rate: number;
   /** Positive monthly direct-debit credit applied before VAT. */

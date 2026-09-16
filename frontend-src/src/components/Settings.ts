@@ -94,6 +94,7 @@ const FIELD_GROUPS: FieldGroup[] = [
       { key: "gas_network_variable_rate", label: "Network Variable Rate", step: "0.0001", unit: "EUR/kWh", type: "number" },
       { key: "gas_tax_rate", label: "Gas Tax", step: "0.0001", unit: "EUR/kWh", type: "number" },
       { key: "gas_vat_rate", label: "Gas VAT Rate", step: "0.01", unit: "decimal (0.08 = 8%)", type: "number" },
+      { key: "gas_kwh_per_m3", label: "Volume → Energy Conversion", step: "0.1", unit: "kWh/m³", type: "number" },
     ],
   },
   {

@@ -73,6 +73,7 @@ const DEFAULT_BILLING = {
   gas_network_variable_rate: 0.012,
   gas_tax_rate: 0.001,
   gas_vat_rate: 0.08,
+  gas_kwh_per_m3: 11.0,
   compensation_fund_rate: -0.001,
   electricity_tax_rate: 0.001,
   domiciliation_discount: 1.0,

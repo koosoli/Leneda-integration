@@ -3,11 +3,12 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
-## [Unreleased]
+## [v2.18.1] - 2026-09-16
 
 ### Bug Fixes
 - **Electricity subsidy double-counted with compensation credit:** the August 2026 SUDenergie bill showed the Resilienzpak subsidy *through* the compensation line (“Mécanisme de compensation A −0,0371/kWh” = −€0.04/kWh incl. VAT), while the app stacked the −€0.001 base credit on top of the separate subsidy line (81,73 € estimated vs. 82,19 € billed). The electricity preset now suspends the base Compensation Fund credit on subsidised kWh via a new `suspends_compensation` flag (auto-applied to stored presets), and the estimate reproduces the printed bill within 2 cents (supplier 4-decimal rate rounding).
 - **Subsidy quantity reconciled to billed import:** the eligible subsidy quantity was recomputed from 15-minute intervals (384,552 kWh) and could diverge from the billed grid import (382,759 kWh). Intervals now only split the period; quantities scale to the official meter totals. Covered by the SUDenergie 08.2026 regression test and shared Python/TypeScript parity fixtures.
+- **Gas billing for volume-only meters (issue #92, part 1):** meters without a kWh channel billed 0,00 EUR on every variable gas line. Billing now derives energy from the measured volume with a configurable conversion factor (`gas_kwh_per_m3`, default 11 kWh/m³, new Settings field), flagged as estimated in the invoice. The gas-subsidy volume derivation uses the same factor.
 
 
 ## [v2.18.0] - 2026-08-15

@@ -26,6 +26,7 @@ import {
   type SolarAllocationMode,
 } from "../utils/solarAllocation";
 import { computeBillingAdjustments } from "../utils/billingAdjustments";
+import { effectiveGasEnergyKwh } from "../utils/gas";
 
 const CREOS_REFERENCE_POWER_LEVELS: ReadonlyArray<{
   kw: number;
@@ -336,6 +337,11 @@ export function renderInvoice(state: AppState): string {
   const gasEnergy = d.gas_energy || 0;
   const gasVolume = d.gas_volume || 0;
   const hasGas = gasEnergy > 0 || gasVolume > 0;
+  // Volume-only meters have no metered kWh channel: bill on energy derived
+  // from the measured volume (issue #92).
+  const billedGasEnergy = effectiveGasEnergyKwh(gasEnergy, gasVolume, config.gas_kwh_per_m3);
+  const gasEnergyKwh = billedGasEnergy.energyKwh;
+  const gasEnergyEstimated = billedGasEnergy.estimated;
   const rateWindows = config.consumption_rate_windows ?? [];
   const referenceWindows = config.reference_power_windows ?? [];
   const windowedUsage = state.consumptionTimeseries
@@ -402,6 +408,7 @@ export function renderInvoice(state: AppState): string {
     fallbackSelfConsumedKwh: totalSolarToHome,
     gasVolumeM3: gasVolume,
     gasEnergyKwh: gasEnergy,
+    gasKwhPerM3: config.gas_kwh_per_m3 ?? 11,
   });
   const electricityAdjustmentLines = billingAdjustments.electricity.lines;
   const gasAdjustmentLines = billingAdjustments.gas.lines;
@@ -545,10 +552,10 @@ export function renderInvoice(state: AppState): string {
 
   // ── Gas cost calculation ──
   const gasFixedFee = (config.gas_fixed_fee ?? 6.50) * proFactor;
-  const gasVariableCost = gasEnergy * (config.gas_variable_rate ?? 0.0550);
+  const gasVariableCost = gasEnergyKwh * (config.gas_variable_rate ?? 0.0550);
   const gasNetworkFee = (config.gas_network_fee ?? 4.80) * proFactor;
-  const gasNetworkVariableCost = gasEnergy * (config.gas_network_variable_rate ?? 0.0120);
-  const gasTax = gasEnergy * (config.gas_tax_rate ?? 0.0010);
+  const gasNetworkVariableCost = gasEnergyKwh * (config.gas_network_variable_rate ?? 0.0120);
+  const gasTax = gasEnergyKwh * (config.gas_tax_rate ?? 0.0010);
   // Same per-line cent rounding as the electricity invoice above.
   const gasSubtotal = roundCents(
     [gasFixedFee, gasVariableCost, gasNetworkFee, gasNetworkVariableCost, gasTax].reduce(
@@ -800,7 +807,7 @@ export function renderInvoice(state: AppState): string {
           <span class="badge" style="background: var(--clr-consumption-muted); color: var(--clr-consumption);">🔌 ${fmtKwh(billedConsumption)} kWh bought from grid</span>
           <span class="badge" style="background: var(--clr-production-muted); color: var(--clr-production);">☀️ ${fmtKwh(production)} kWh produced</span>
           ${soldToMarket > 0 ? `<span class="badge" style="background: var(--clr-export-muted); color: var(--clr-export);">📤 ${fmtKwh(soldToMarket)} kWh exported</span>` : ""}
-          ${hasGas ? `<span class="badge" style="background: rgba(255,160,50,0.12); color: #f5a623;">🔥 ${fmtKwh(gasEnergy)} kWh gas (${fmtVolume(gasVolume)} m³)</span>` : ""}
+          ${hasGas ? `<span class="badge" style="background: rgba(255,160,50,0.12); color: #f5a623;">🔥 ${fmtKwh(gasEnergyKwh)} kWh gas (${fmtVolume(gasVolume)} m³)${gasEnergyEstimated ? " (estimated)" : ""}</span>` : ""}
         </div>
       </div>
 
@@ -1008,7 +1015,7 @@ export function renderInvoice(state: AppState): string {
       <div class="card invoice-card gas-invoice-card">
         <h3 class="card-title"><span class="title-icon">🔥</span> Gas Cost Estimate &mdash; ${rangeLabel}</h3>
         <div style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4);">
-          <span class="badge" style="background: rgba(255,160,50,0.12); color: #f5a623;">🔥 ${fmtKwh(gasEnergy)} kWh</span>
+          <span class="badge" style="background: rgba(255,160,50,0.12); color: #f5a623;">🔥 ${fmtKwh(gasEnergyKwh)} kWh${gasEnergyEstimated ? " (estimated from volume)" : ""}</span>
           <span class="badge" style="background: rgba(255,160,50,0.12); color: #f5a623;">📐 ${fmtVolume(gasVolume)} m³</span>
         </div>
         <table class="invoice-table">
@@ -1027,7 +1034,7 @@ export function renderInvoice(state: AppState): string {
               <td style="text-align: right;">${fmt(gasFixedFee)}</td>
             </tr>
             <tr>
-              <td>Energy (${fmtKwh(gasEnergy)} kWh)</td>
+              <td>Energy (${fmtKwh(gasEnergyKwh)} kWh${gasEnergyEstimated ? ", estimated from volume" : ""})</td>
               <td style="text-align: right;">${fmtNum(config.gas_variable_rate ?? 0.0550, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(gasVariableCost)}</td>
             </tr>
@@ -1039,14 +1046,14 @@ export function renderInvoice(state: AppState): string {
               <td style="text-align: right;">${fmt(gasNetworkFee)}</td>
             </tr>
             <tr>
-              <td>Network Variable (${fmtKwh(gasEnergy)} kWh)</td>
+              <td>Network Variable (${fmtKwh(gasEnergyKwh)} kWh)</td>
               <td style="text-align: right;">${fmtNum(config.gas_network_variable_rate ?? 0.0120, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(gasNetworkVariableCost)}</td>
             </tr>
 
             <tr class="section-label"><td colspan="3">Gas Tax</td></tr>
             <tr>
-              <td>Gas Tax (${fmtKwh(gasEnergy)} kWh)</td>
+              <td>Gas Tax (${fmtKwh(gasEnergyKwh)} kWh)</td>
               <td style="text-align: right;">${fmtNum(config.gas_tax_rate ?? 0.0010, 4)} ${currency}/kWh</td>
               <td style="text-align: right;">${fmt(gasTax)}</td>
             </tr>

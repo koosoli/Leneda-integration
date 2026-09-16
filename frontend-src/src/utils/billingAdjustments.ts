@@ -400,6 +400,7 @@ function gasLines(
   periodStart: string,
   periodEnd: string,
   vatRate: number,
+  gasKwhPerM3: number = GAS_KWH_PER_M3,
 ): { lines: AdjustmentLine[]; estimatedAny: boolean } {
   const gas = adjustments.filter(
     (adj) => adj.commodity === "gas" && adj.basis === "gas_volume_m3" && isActive(adj),
@@ -408,8 +409,10 @@ function gasLines(
 
   let estimatedAny = false;
   let volume = Math.max(0, gasVolumeM3 || 0);
+  let factor = Number(gasKwhPerM3) || GAS_KWH_PER_M3;
+  if (!isFinite(factor) || factor <= 0) factor = GAS_KWH_PER_M3;
   if (volume <= 0 && gasEnergyKwh > 0) {
-    volume = gasEnergyKwh / GAS_KWH_PER_M3;
+    volume = gasEnergyKwh / factor;
     estimatedAny = true;
   }
 
@@ -438,6 +441,7 @@ export interface ComputeBillingAdjustmentsInput {
   fallbackSelfConsumedKwh?: number;
   gasVolumeM3?: number;
   gasEnergyKwh?: number;
+  gasKwhPerM3?: number;
 }
 
 export function computeBillingAdjustments(
@@ -462,6 +466,7 @@ export function computeBillingAdjustments(
     input.periodStart,
     input.periodEnd,
     input.gasVatRate || 0,
+    input.gasKwhPerM3 ?? GAS_KWH_PER_M3,
   );
 
   const totals = (lines: AdjustmentLine[]) => {
