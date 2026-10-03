@@ -468,7 +468,11 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                             ))
                             extra_prod_map.append(export_key)
 
-                # Tasks for fetching detailed 15-min gas data for manual aggregation
+                # Tasks for fetching detailed 15-min gas data for manual aggregation.
+                # Skipped entirely when no gas meter is configured (issue #93):
+                # core gas sensors are only created when has_gas is true, so
+                # querying gas OBIS codes against the electricity meter only
+                # produces empty results and log spam.
                 _LOGGER.debug("Setting up tasks for detailed gas data...")
                 gas_tasks = {}
                 gas_definitions = {
@@ -489,10 +493,13 @@ class LenedaDataUpdateCoordinator(DataUpdateCoordinator):
                     "g_24_last_month_std_volume": (GAS_STD_VOLUME_CODE, start_of_last_month, end_of_last_month),
                 }
 
-                for key, (code, start, end) in gas_definitions.items():
-                    gas_tasks[key] = self.api_client.async_get_metering_data(
-                        self._meter_for_obis(code), code, start, end
-                    )
+                if self.has_gas:
+                    for key, (code, start, end) in gas_definitions.items():
+                        gas_tasks[key] = self.api_client.async_get_metering_data(
+                            self._meter_for_obis(code), code, start, end
+                        )
+                else:
+                    _LOGGER.debug("Skipping gas API requests: no gas meter configured")
 
                 # Add tasks for sharing codes for last month
                 for key, code in SHARING_CODES.items():

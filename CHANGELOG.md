@@ -3,6 +3,15 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.19.0] - 2026-10-03
+
+### New Features
+- **Hourly electricity statistics for the Home Assistant Energy dashboard (issues #92 part 3, #94):** period sensors update once per day, so the native Energy dashboard rendered a full day as a single hourly spike. The integration now mirrors real hourly consumption (`1-1:1.29.0`, `aggregation_level="Hour"`) into long-term statistics via `async_add_external_statistics` (`leneda:<meter>_hourly_consumption`, cumulative `sum`). First setup backfills 31 days, later refreshes import only missing completed hours. Daily/weekly/monthly sensors are unchanged.
+
+### Bug Fixes
+- **Gas API requests skipped when no gas meter is configured (issue #93):** every coordinator refresh queried all 15 gas OBIS combinations against the electricity meter, producing empty results and log spam. Gas fetching is now guarded by `has_gas` (meter type or legacy `meter_has_gas`), independent of the advanced gas sensor-pack toggle. Covered by `tests/test_coordinator_gas_guard.py`.
+
+
 ## [v2.18.1] - 2026-09-16
 
 ### Bug Fixes

@@ -95,6 +95,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ── Sensor platform ──
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # ── Hourly external statistics for the HA Energy dashboard (issues #92/#94) ──
+    # Fire-and-forget: missing recorder or fetch errors only skip the import.
+    try:
+        from .statistics import async_setup_hourly_statistics
+
+        hass.async_create_task(async_setup_hourly_statistics(hass, coordinator))
+    except Exception as err:  # pragma: no cover - defensive, never break setup
+        _LOGGER.debug("Leneda statistics setup skipped: %s", err)
+
     # ── Service: request_data_access ──
     async def handle_data_access_request(call):
         """Handle the data access request service call."""
