@@ -3,6 +3,12 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.19.1] - 2026-10-03
+
+### Bug Fixes
+- **Hassfest validation:** pinned `aiofiles` to 25.1.0 to match Home Assistant's requirement, and declared the optional `recorder` dependency in `after_dependencies` (hourly external statistics import skips gracefully when recorder is unavailable).
+
+
 ## [v2.19.0] - 2026-10-03
 
 ### New Features
