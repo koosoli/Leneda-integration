@@ -3,6 +3,12 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.19.2] - 2026-10-03
+
+### Bug Fixes
+- **Hassfest validation:** declare `aiofiles>=25.1.0` as a minimum version instead of a pin, as required for packages Home Assistant depends on.
+
+
 ## [v2.19.1] - 2026-10-03
 
 ### Bug Fixes
