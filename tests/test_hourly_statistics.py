@@ -48,6 +48,10 @@ def test_metadata_shape_for_energy_dashboard():
     assert meta["unit_of_measurement"] == "kWh"
     assert meta["has_sum"] is True
     assert meta["has_mean"] is False
+    # HA 2026.11 requires mean_type (NONE=0 for sum-only energy stats);
+    # HA 2025.11+ requires unit_class ("energy" enables kWh conversions).
+    assert int(meta["mean_type"]) == 0
+    assert meta["unit_class"] == "energy"
 
 
 def test_extract_hourly_values_accepts_both_payload_shapes():

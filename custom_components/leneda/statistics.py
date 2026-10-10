@@ -40,14 +40,40 @@ def hourly_statistic_id(meter_id: str) -> str:
     return f"{DOMAIN_SOURCE}:{cleaned}_hourly_consumption"
 
 
+def _mean_type_none() -> Any:
+    """Return StatisticMeanType.NONE without a hard HA dependency (tests)."""
+    try:
+        from homeassistant.components.recorder.models import StatisticMeanType
+
+        return StatisticMeanType.NONE
+    except Exception:
+        return 0
+
+
+def _energy_unit_class() -> Any:
+    """Return EnergyConverter.UNIT_CLASS ("energy") without hard HA dependency."""
+    try:
+        from homeassistant.util.unit_conversion import EnergyConverter
+
+        return EnergyConverter.UNIT_CLASS
+    except Exception:
+        return "energy"
+
+
 def hourly_statistic_metadata(meter_id: str, name: str | None = None) -> dict[str, Any]:
     """Return StatisticMetaData for hourly consumption."""
     return {
         "source": DOMAIN_SOURCE,
         "statistic_id": hourly_statistic_id(meter_id),
         "unit_of_measurement": "kWh",
+        # has_mean kept for older HA; mean_type is required since HA 2026.11
+        # (issue #94 follow-up: missing mean_type logged a deprecation warning).
         "has_mean": False,
+        "mean_type": _mean_type_none(),
         "has_sum": True,
+        # unit_class "energy" enables kWh conversions; missing unit_class
+        # is deprecated since HA 2025.11.
+        "unit_class": _energy_unit_class(),
         "name": name or f"Leneda hourly consumption (...{(meter_id or '')[-7:]})",
     }
 

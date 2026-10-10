@@ -3,6 +3,12 @@
 All notable changes to the **Leneda HACS Integration** will be documented in this file.
 
 
+## [v2.19.3] - 2026-10-10
+
+### Bug Fixes
+- **Hourly statistics metadata for HA 2026.11 (issue #94 follow-up):** `async_add_external_statistics` now sets `mean_type=NONE` and `unit_class="energy"` alongside the legacy `has_mean` flag. This silences the `helpers/frame.py` deprecation warning (`doesn't specify mean_type ... This will stop working in Home Assistant 2026.11`) and the `unit_class` deprecation (required since HA 2025.11). Energy-dashboard import behaviour is unchanged.
+
+
 ## [v2.19.2] - 2026-10-03
 
 ### Bug Fixes
